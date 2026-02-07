@@ -9,7 +9,8 @@ class Player:
     name: str
     position: str
     team_mlb: str
-    stats: Dict[str, float]  # {'HR': 30, 'QS': 15, ...}
+    dollars: float  # <--- Added this field
+    stats: Dict[str, float]
     is_pitcher: bool
 
 @dataclass

@@ -1,15 +1,13 @@
 import pandas as pd
 import os
-import glob
 
 def load_and_merge_data(data_dir="data"):
     """
-    Loads all CSVs from the data directory, merges them by PlayerId,
-    and calculates the average projections.
+    Loads projection CSVs AND Auction Value CSVs, merging them by PlayerId.
     """
     
-    # 1. Define the files and their categories (Mapping your R list)
-    # You can update these filenames as needed
+    # --- FILE CONFIGURATION ---
+    # Projection Files
     batting_files = [
         "2025_batx_bat.csv", "2025_steamer_bat.csv", 
         "2025_zips_bat.csv", "2025_oopsy_bat.csv"
@@ -19,49 +17,81 @@ def load_and_merge_data(data_dir="data"):
         "2025_zips_pitch.csv", "2025_oopsy_pitch.csv"
     ]
     
-    # Columns to keep (The Python equivalent of your R vectors)
-    bat_cols = ['PlayerId', 'Name', 'Team', 'POS', 'AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'ADP']
-    pitch_cols = ['PlayerId', 'Name', 'Team', 'POS', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'K/9', 'QS', 'ADP']
+    # Auction Files (Single source as per your R code)
+    auction_bat_file = "2025_batx_auction_bat.csv"
+    auction_pitch_file = "2025_oopsy_auction_pitch.csv"
 
-    # 2. Helper to load and concat list of files
+    # Columns to Keep
+    bat_cols = ['PlayerId', 'Name', 'Team', 'POS', 'AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'ADP']
+    pitch_cols = ['PlayerId', 'Name', 'Team', 'POS', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'ADP']
+    auction_cols = ['PlayerId', 'Dollars']  # We only need the ID and the Value
+
+    # --- HELPER FUNCTION ---
     def load_group(filenames, cols):
         dfs = []
         for f in filenames:
             path = os.path.join(data_dir, f)
             if os.path.exists(path):
+                # Only load columns that actually exist in the file
                 df = pd.read_csv(path)
-                # Standardize column names if necessary here
-                # ensure we only grab columns that exist in this specific file
-                available_cols = [c for c in cols if c in df.columns] 
-                dfs.append(df[available_cols])
+                valid_cols = [c for c in cols if c in df.columns]
+                dfs.append(df[valid_cols])
         
         if not dfs:
             return pd.DataFrame()
-            
-        # Stack them all on top of each other
         return pd.concat(dfs, ignore_index=True)
 
-    # 3. Process Batters
+    # --- LOAD & PROCESS BATTERS ---
+    # 1. Load Projections
     raw_bat = load_group(batting_files, bat_cols)
-    # Group by PlayerId and take the mean of numeric columns
+    if raw_bat.empty:
+        raise FileNotFoundError("No batting projection files found in /data folder!")
+
+    # 2. Average the Projections
     bat_final = raw_bat.groupby('PlayerId').mean(numeric_only=True).reset_index()
-    # Merge back names/teams (taking the first occurrence)
+    
+    # 3. Merge Metadata (Name, Team, POS) from the first file found
     bat_meta = raw_bat[['PlayerId', 'Name', 'Team', 'POS']].drop_duplicates('PlayerId')
-    bat_final = pd.merge(bat_final, bat_meta, on='PlayerId')
+    bat_final = pd.merge(bat_final, bat_meta, on='PlayerId', how='left')
+
+    # 4. Load & Merge Auction Values
+    auc_bat_path = os.path.join(data_dir, auction_bat_file)
+    if os.path.exists(auc_bat_path):
+        auc_df = pd.read_csv(auc_bat_path)[auction_cols]
+        # Merge on PlayerId, keep all batters even if they have no auction value
+        bat_final = pd.merge(bat_final, auc_df, on='PlayerId', how='left')
+        bat_final['Dollars'] = bat_final['Dollars'].fillna(0) # Fill missing with $0
+    else:
+        bat_final['Dollars'] = 0
+
     bat_final['Type'] = 'Batter'
 
-    # 4. Process Pitchers
+    # --- LOAD & PROCESS PITCHERS ---
+    # 1. Load Projections
     raw_pitch = load_group(pitching_files, pitch_cols)
+    if raw_pitch.empty:
+        raise FileNotFoundError("No pitching projection files found in /data folder!")
+
+    # 2. Average the Projections
     pitch_final = raw_pitch.groupby('PlayerId').mean(numeric_only=True).reset_index()
+    
+    # 3. Merge Metadata
     pitch_meta = raw_pitch[['PlayerId', 'Name', 'Team', 'POS']].drop_duplicates('PlayerId')
-    pitch_final = pd.merge(pitch_final, pitch_meta, on='PlayerId')
+    pitch_final = pd.merge(pitch_final, pitch_meta, on='PlayerId', how='left')
+
+    # 4. Load & Merge Auction Values
+    auc_pitch_path = os.path.join(data_dir, auction_pitch_file)
+    if os.path.exists(auc_pitch_path):
+        auc_df = pd.read_csv(auc_pitch_path)[auction_cols]
+        pitch_final = pd.merge(pitch_final, auc_df, on='PlayerId', how='left')
+        pitch_final['Dollars'] = pitch_final['Dollars'].fillna(0)
+    else:
+        pitch_final['Dollars'] = 0
+
     pitch_final['Type'] = 'Pitcher'
 
-    # 5. CRITICAL: Reverse Engineering for Accurate Team Totals
-    # We cannot sum ERA/WHIP. We must sum ER and (H+BB).
-    # ER = (ERA * IP) / 9
+    # --- REVERSE ENGINEERING (ERA/WHIP) ---
     pitch_final['ER'] = (pitch_final['ERA'] * pitch_final['IP']) / 9
-    # H_BB = WHIP * IP
     pitch_final['H_BB'] = pitch_final['WHIP'] * pitch_final['IP']
 
     return bat_final, pitch_final
