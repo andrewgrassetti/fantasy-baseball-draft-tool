@@ -17,7 +17,7 @@ if 'engine' not in st.session_state:
 engine = st.session_state.engine
 
 # --- TABS ---
-tab1, tab2 = st.tabs(["Draft Room", "Market Analysis"])
+tab1, tab2, tab3 = st.tabs(["⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters"])
 
 # ==========================================
 # TAB 1: DRAFT ROOM (MAIN DASHBOARD)
@@ -131,3 +131,97 @@ with tab2:
     fig.update_traces(marker=dict(size=10, line=dict(width=1, color='DarkSlateGrey')))
     
     st.plotly_chart(fig, use_container_width=True)
+
+
+# ==========================================
+# TAB 3: TEAM ROSTERS
+# ==========================================
+with tab3:
+    st.header("Team Rosters")
+    
+    # View Mode Selection
+    view_mode = st.radio("View Mode", ["All Teams", "Single Team"], horizontal=True)
+    
+    # Get all teams sorted by name
+    team_names = sorted(engine.teams.keys())
+    
+    # Single Team Mode: Show dropdown
+    selected_team = None
+    if view_mode == "Single Team":
+        selected_team = st.selectbox("Select Team", team_names)
+    
+    # Display Teams
+    for team_name in team_names:
+        # Get roster data
+        roster_df = engine.get_team_roster_df(team_name)
+        player_count = len(roster_df)
+        
+        # Determine if expander should be expanded
+        is_expanded = False
+        if view_mode == "Single Team" and team_name == selected_team:
+            is_expanded = True
+        
+        # Create expander with team name and player count
+        with st.expander(f"**{team_name}** — {player_count} players", expanded=is_expanded):
+            if roster_df.empty:
+                st.info("No players drafted yet.")
+            else:
+                # Get roster summary
+                summary = engine.get_roster_summary(team_name)
+                
+                # Display Roster Slot Summary in 3 columns
+                st.subheader("Roster Slot Summary")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**Batting Slots**")
+                    for slot in ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']:
+                        filled = summary[slot]['filled']
+                        limit = summary[slot]['limit']
+                        st.text(f"{slot}: {filled}/{limit}")
+                
+                with col2:
+                    st.markdown("**Pitching Slots**")
+                    for slot in ['SP', 'RP', 'P']:
+                        filled = summary[slot]['filled']
+                        limit = summary[slot]['limit']
+                        st.text(f"{slot}: {filled}/{limit}")
+                
+                with col3:
+                    st.markdown("**Bench / Reserve**")
+                    for slot in ['BN', 'IL', 'NA']:
+                        filled = summary[slot]['filled']
+                        limit = summary[slot]['limit']
+                        st.text(f"{slot}: {filled}/{limit}")
+                
+                st.divider()
+                
+                # Display Roster Table split by Batters/Pitchers
+                st.subheader("Roster Table")
+                col_left, col_right = st.columns(2)
+                
+                with col_left:
+                    st.markdown("**Batters**")
+                    batters = roster_df[roster_df['Type'] == 'Batter']
+                    if batters.empty:
+                        st.caption("None drafted.")
+                    else:
+                        # Display without the Type column
+                        st.dataframe(
+                            batters[['Name', 'POS', 'MLB Team', 'Dollars']], 
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                
+                with col_right:
+                    st.markdown("**Pitchers**")
+                    pitchers = roster_df[roster_df['Type'] == 'Pitcher']
+                    if pitchers.empty:
+                        st.caption("None drafted.")
+                    else:
+                        # Display without the Type column
+                        st.dataframe(
+                            pitchers[['Name', 'POS', 'MLB Team', 'Dollars']], 
+                            hide_index=True,
+                            use_container_width=True
+                        )

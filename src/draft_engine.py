@@ -100,3 +100,59 @@ class DraftEngine:
         # Reorder columns to put Team first
         cols = ['Team'] + [c for c in df.columns if c != 'Team']
         return df[cols]
+
+    def get_team_roster_df(self, team_name):
+        """Returns a pandas DataFrame of a team's current roster for display.
+        
+        Each row includes:
+        - Name: player name
+        - POS: position
+        - MLB Team: MLB team abbreviation
+        - Type: "Batter" or "Pitcher"
+        - Dollars: auction dollar value
+        
+        The DataFrame is sorted by Type (Batters first), then POS, then Name.
+        """
+        team = self.teams.get(team_name)
+        if not team:
+            return pd.DataFrame()
+        
+        roster_data = []
+        for player in team.roster:
+            # Handle NaN/None values for display
+            pos = player.position if not pd.isna(player.position) else 'Unknown'
+            mlb_team = player.team_mlb if not pd.isna(player.team_mlb) else 'N/A'
+            
+            roster_data.append({
+                'Name': player.name,
+                'POS': pos,
+                'MLB Team': mlb_team,
+                'Type': 'Pitcher' if player.is_pitcher else 'Batter',
+                'Dollars': player.dollars
+            })
+        
+        df = pd.DataFrame(roster_data)
+        if df.empty:
+            return df
+        
+        # Sort by Type (Batters first), then POS, then Name
+        df = df.sort_values(by=['Type', 'POS', 'Name'], ascending=[True, True, True])
+        return df.reset_index(drop=True)
+
+    def get_roster_summary(self, team_name):
+        """Returns a dictionary summarizing filled vs. total slots for a team.
+        
+        For each slot in Team.SLOT_LIMITS, returns {'filled': <int>, 'limit': <int>}.
+        """
+        team = self.teams.get(team_name)
+        if not team:
+            return {}
+        
+        summary = {}
+        for slot, limit in Team.SLOT_LIMITS.items():
+            summary[slot] = {
+                'filled': team.slots_filled.get(slot, 0),
+                'limit': limit
+            }
+        
+        return summary
