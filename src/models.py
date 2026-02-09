@@ -39,8 +39,16 @@ class Team:
         
         # --- SLOT ASSIGNMENT LOGIC ---
         # 1. Try Primary Position
-        # Clean position string (e.g., "C/1B" -> tries "C", then "1B")
-        possible_pos = player.position.split('/') 
+        # Handle NaN/None positions
+        if pd.isna(player.position) or player.position is None:
+            # Default to generic position based on player type
+            if player.is_pitcher:
+                possible_pos = ['P']
+            else:
+                possible_pos = ['Util']
+        else:
+            # Clean position string (e.g., "C/1B" -> tries "C", then "1B")
+            possible_pos = str(player.position).split('/') 
         
         assigned = False
         

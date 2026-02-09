@@ -119,10 +119,14 @@ class DraftEngine:
         
         roster_data = []
         for player in team.roster:
+            # Handle NaN/None values for display
+            pos = player.position if not pd.isna(player.position) else 'Unknown'
+            mlb_team = player.team_mlb if not pd.isna(player.team_mlb) else 'N/A'
+            
             roster_data.append({
                 'Name': player.name,
-                'POS': player.position,
-                'MLB Team': player.team_mlb,
+                'POS': pos,
+                'MLB Team': mlb_team,
                 'Type': 'Pitcher' if player.is_pitcher else 'Batter',
                 'Dollars': player.dollars
             })
