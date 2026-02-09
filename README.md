@@ -8,7 +8,7 @@ A modular, Python-based fantasy baseball draft engine featuring a Streamlit dash
 * **5x5 Roto Scoring:** Automatically calculates standings for:
     * **Batting:** R, HR, RBI, SB, OBP
     * **Pitching:** K, SV, QS, ERA, WHIP
-* **Smart Roster Logic:** Validates roster slots (C, 1B, MI, OF, Util, SP, RP, Bench) and handles multi-position eligibility.
+* **Smart Roster Logic:** Validates roster slots (C, 1B, 2B, 3B, SS, 3xOF, 2xUtil, 3xSP, 2xRP, P, 7xBench) and handles multi-position eligibility.
 * **Keeper Management:** Pre-assign keepers to specific teams with value tracking before the draft starts.
 * **Market Analysis:** Interactive Plotly scatter plots to visualize player value tiers (e.g., Projected HR vs. Auction Dollars).
 * **Data Agnostic:** Built to ingest standard CSV exports from FanGraphs (Steamer, BAT X, ZiPS, etc.).
