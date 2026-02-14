@@ -1,7 +1,5 @@
 import pandas as pd
 import os
-import string
-import random
 
 # --- COLUMN DEFINITIONS (matching R script) ---
 COLUMNS_TO_KEEP = {
@@ -57,8 +55,9 @@ def _filter_columns(df, keep_cols):
 
 def _merge_dfs(df_list, by_col='PlayerId'):
     """
-    Sequentially merge DataFrames with auto-generated suffixes for duplicate columns.
-    Mimics R's Reduce(merge, ..., all=TRUE) with random suffixes.
+    Sequentially merge DataFrames with deterministic suffixes for duplicate columns.
+    Mimics R's Reduce(merge, ..., all=TRUE).
+    Uses suffixes based on merge index for reproducibility.
     """
     if not df_list:
         return pd.DataFrame()
@@ -71,9 +70,9 @@ def _merge_dfs(df_list, by_col='PlayerId'):
     
     result = df_list[0]
     
-    for df in df_list[1:]:
-        # Generate random suffix (like R script)
-        suffix = ''.join(random.choices(string.ascii_lowercase, k=4))
+    for idx, df in enumerate(df_list[1:], start=1):
+        # Use deterministic suffix based on merge index
+        suffix = f's{idx}'
         result = pd.merge(result, df, on=by_col, how='outer', suffixes=('', f'.{suffix}'))
     
     return result
@@ -83,13 +82,15 @@ def _average_columns(df, patterns, digits=3):
     """
     Row-wise average columns matching each pattern.
     Mimics R's rowMeans(..., na.rm=TRUE).
-    For each pattern, finds base column and all suffixed variants, then computes row mean.
+    For each pattern, finds base column and all suffixed variants (e.g., 'HR', 'HR.s1', 'HR.s2'),
+    then computes row mean.
     """
     for pattern in patterns:
-        # Find all columns matching this pattern (base + suffixed versions)
-        # Match exact pattern or pattern with suffix like ".xxxx"
-        matching_cols = [col for col in df.columns 
-                        if col == pattern or col.startswith(f"{pattern}.")]
+        # Find all columns matching this pattern (base + suffixed versions with .sN format)
+        # Must match exact pattern or pattern with suffix like ".s1", ".s2", etc.
+        import re
+        pattern_regex = re.compile(f'^{re.escape(pattern)}(\\.s\\d+)?$')
+        matching_cols = [col for col in df.columns if pattern_regex.match(col)]
         
         if len(matching_cols) > 0:
             # Compute row-wise mean, ignoring NaN values
@@ -162,6 +163,8 @@ def load_and_merge_data(data_dir="data"):
     bat_merged = _average_columns(bat_merged, BATTING_AVERAGES, digits=3)
     
     # 6. Add Barrel_prc if Barrel% exists
+    # Note: Barrel% is a decimal (0-1), Barrel_prc is percentage (0-100)
+    # Keeping both for backward compatibility with existing app components
     if 'Barrel%' in bat_merged.columns:
         bat_merged['Barrel_prc'] = (bat_merged['Barrel%'] * 100).round(3)
     
