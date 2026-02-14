@@ -140,7 +140,8 @@ with tab0:
                                 'Player': player.name,
                                 'Position': player.position,
                                 'Cost': player.dollars,
-                                'ID': player.player_id
+                                'ID': player.player_id,
+                                'is_pitcher': True
                             })
                 else:
                     mask = engine.bat_df['PlayerId'] == player.player_id
@@ -152,7 +153,8 @@ with tab0:
                                 'Player': player.name,
                                 'Position': player.position,
                                 'Cost': player.dollars,
-                                'ID': player.player_id
+                                'ID': player.player_id,
+                                'is_pitcher': False
                             })
         
         if all_keepers:
@@ -165,7 +167,8 @@ with tab0:
                         with col_a:
                             st.text(f"{keeper['Player']} ({keeper['Position']}) - ${keeper['Cost']:.0f}")
                         with col_b:
-                            if st.button("Remove", key=f"remove_{keeper['ID']}"):
+                            player_type = "P" if keeper['is_pitcher'] else "B"
+                            if st.button("Remove", key=f"remove_{keeper['ID']}_{player_type}_{keeper['Team']}"):
                                 if engine.remove_keeper(keeper['ID']):
                                     st.success("Removed")
                                     st.rerun()
