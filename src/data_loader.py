@@ -117,7 +117,18 @@ def load_and_merge_data(data_dir="data"):
     
     auction_bat_file = "2025_batx_auction_bat.csv"
     auction_pitch_file = "2025_oopsy_auction_pitch.csv"
-    statcast_bat_file = "2025_statcast_bat.csv"
+    
+    # Extract year from projection files and use previous year for statcast
+    # Statcast data is always from the prior season
+    import re
+    year_match = re.search(r'(\d{4})_', batting_files[0])
+    if year_match:
+        projection_year = int(year_match.group(1))
+        statcast_year = projection_year - 1
+        statcast_bat_file = f"{statcast_year}_statcast_bat.csv"
+    else:
+        # Fallback if year pattern not found
+        statcast_bat_file = "2024_statcast_bat.csv"
     
     # --- PROCESS BATTERS ---
     
