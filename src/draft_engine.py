@@ -25,8 +25,17 @@ class DraftEngine:
             player_id: The player ID to normalize (can be int or str)
             
         Returns:
-            Normalized player_id that matches the DataFrame PlayerId type
+            Normalized player_id that matches the DataFrame PlayerId type.
+            Returns None if player_id is None.
+            
+        Note:
+            If DataFrame has integer PlayerId, attempts to convert player_id to int.
+            If conversion fails, returns the original value.
+            If DataFrame has string PlayerId, converts to string.
         """
+        if player_id is None:
+            return None
+            
         # Check the DataFrame type (both bat and pitch should have same type)
         df_type = self.bat_df['PlayerId'].dtype
         
@@ -38,18 +47,26 @@ class DraftEngine:
                 return player_id
         else:
             # DataFrame has strings (or other), ensure player_id is string
-            return str(player_id) if player_id is not None else player_id
+            return str(player_id)
 
 
     def process_keeper(self, player_id, team_name, cost=0.0, is_pitcher=None):
         """Forces a player onto a team as a keeper.
         
         Args:
-            player_id: The unique identifier of the player (can be int or str)
+            player_id: The unique identifier of the player (can be int or str).
+                      Will be normalized to match the DataFrame PlayerId dtype.
             team_name: The team to assign the keeper to
             cost: The keeper cost (default: 0.0) - this overrides the DataFrame Dollars field
             is_pitcher: Whether the player is a pitcher (True) or batter (False).
                        If None, will check pitchers first, then batters (legacy behavior).
+        
+        Returns:
+            True if the keeper was successfully processed, False if player not found.
+            
+        Note:
+            Player ID will be automatically converted to match DataFrame type (int or str).
+            If the player_id cannot be found in either DataFrame, returns False.
         """
         row = None
         determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)

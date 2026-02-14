@@ -1,3 +1,6 @@
 __pycache__/
 .env
 saves/
+
+# Test scripts
+test_*.py
