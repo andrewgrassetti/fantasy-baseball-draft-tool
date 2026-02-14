@@ -70,12 +70,28 @@ with tab1:
     
     if view_option == "Batters":
         df_show = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'POS', 'Team', 'HR', 'SB', 'OBP', 'ADP']
+        cols = ['Name', 'POS', 'Team', 'Dollars', 'HR', 'SB', 'OBP', 'ADP']
     else:
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'Team', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'ADP']
+        cols = ['Name', 'Team', 'Dollars', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'ADP']
+    
+    # Sort by Dollars (auction value) descending
+    df_show = df_show.sort_values(by='Dollars', ascending=False)
+    
+    # Pagination: 50 players per page
+    players_per_page = 50
+    total_players = len(df_show)
+    total_pages = (total_players + players_per_page - 1) // players_per_page  # Ceiling division
+    
+    if total_pages > 0:
+        page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
+        start_idx = (page - 1) * players_per_page
+        end_idx = min(start_idx + players_per_page, total_players)
         
-    st.dataframe(df_show[cols].head(20), hide_index=True)
+        st.caption(f"Showing {start_idx + 1}–{end_idx} of {total_players} players")
+        st.dataframe(df_show[cols].iloc[start_idx:end_idx], hide_index=True)
+    else:
+        st.info("No available players found.")
 
 
 # ==========================================
