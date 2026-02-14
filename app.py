@@ -169,7 +169,7 @@ with tab0:
                         with col_b:
                             player_type = "P" if keeper['is_pitcher'] else "B"
                             if st.button("Remove", key=f"remove_{keeper['ID']}_{player_type}_{keeper['Team']}"):
-                                if engine.remove_keeper(keeper['ID']):
+                                if engine.remove_keeper(keeper['ID'], keeper['is_pitcher']):
                                     st.success("Removed")
                                     st.rerun()
                                 else:
