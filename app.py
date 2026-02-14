@@ -114,7 +114,7 @@ with tab0:
             
             if st.button("Add Keeper", type="primary"):
                 pid, is_pitcher = search_options[selected_keeper_label]
-                if engine.process_keeper(pid, keeper_team, cost=keeper_cost):
+                if engine.process_keeper(pid, keeper_team, cost=keeper_cost, is_pitcher=is_pitcher):
                     st.success(f"Added {selected_keeper_label} to {keeper_team}")
                     st.rerun()
                 else:

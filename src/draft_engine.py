@@ -18,29 +18,65 @@ class DraftEngine:
                           "Team 6", "Team 7", "Team 8", "Team 9", "Team 10", "Team 11", "Team 12"]
         self.teams = {name: Team(name) for name in team_names}
 
-    def process_keeper(self, player_id, team_name, cost=0.0):
-        """Forces a player onto a team as a keeper."""
-        # Find if player is Batter or Pitcher
-        is_pitcher = False
-        row = None
+    def process_keeper(self, player_id, team_name, cost=0.0, is_pitcher=None):
+        """Forces a player onto a team as a keeper.
         
-        # Check Pitchers
-        if player_id in self.pitch_df['PlayerId'].values:
-            is_pitcher = True
-            mask = self.pitch_df['PlayerId'] == player_id
-            self.pitch_df.loc[mask, 'Status'] = 'Keeper' # Mark as Keeper
-            self.pitch_df.loc[mask, 'DraftedBy'] = team_name
-            row = self.pitch_df.loc[mask].iloc[0]
-            
-        # Check Batters
-        elif player_id in self.bat_df['PlayerId'].values:
-            mask = self.bat_df['PlayerId'] == player_id
-            self.bat_df.loc[mask, 'Status'] = 'Keeper'
-            self.bat_df.loc[mask, 'DraftedBy'] = team_name
-            row = self.bat_df.loc[mask].iloc[0]
-            
+        Args:
+            player_id: The unique identifier of the player (can be int or str)
+            team_name: The team to assign the keeper to
+            cost: The keeper cost (default: 0.0) - this overrides the DataFrame Dollars field
+            is_pitcher: Whether the player is a pitcher (True) or batter (False).
+                       If None, will check pitchers first, then batters (legacy behavior).
+        """
+        row = None
+        determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)
+        
+        # Normalize player_id to match the DataFrame type
+        # Try to convert to int if it's a string that looks like a number
+        try:
+            pid = int(player_id)
+        except (ValueError, TypeError):
+            pid = player_id
+        
+        # If is_pitcher is explicitly specified, check only the appropriate dataframe
+        if is_pitcher is not None:
+            if is_pitcher:
+                # Check pitchers only
+                if pid in self.pitch_df['PlayerId'].values:
+                    mask = self.pitch_df['PlayerId'] == pid
+                    self.pitch_df.loc[mask, 'Status'] = 'Keeper'
+                    self.pitch_df.loc[mask, 'DraftedBy'] = team_name
+                    row = self.pitch_df.loc[mask].iloc[0]
+                else:
+                    return False  # Player not found in pitchers
+            else:
+                # Check batters only
+                if pid in self.bat_df['PlayerId'].values:
+                    mask = self.bat_df['PlayerId'] == pid
+                    self.bat_df.loc[mask, 'Status'] = 'Keeper'
+                    self.bat_df.loc[mask, 'DraftedBy'] = team_name
+                    row = self.bat_df.loc[mask].iloc[0]
+                else:
+                    return False  # Player not found in batters
         else:
-            return False # Player not found
+            # Legacy behavior: check pitchers first, then batters
+            if pid in self.pitch_df['PlayerId'].values:
+                determined_is_pitcher = True
+                mask = self.pitch_df['PlayerId'] == pid
+                self.pitch_df.loc[mask, 'Status'] = 'Keeper'
+                self.pitch_df.loc[mask, 'DraftedBy'] = team_name
+                row = self.pitch_df.loc[mask].iloc[0]
+                
+            # Check Batters
+            elif pid in self.bat_df['PlayerId'].values:
+                determined_is_pitcher = False
+                mask = self.bat_df['PlayerId'] == pid
+                self.bat_df.loc[mask, 'Status'] = 'Keeper'
+                self.bat_df.loc[mask, 'DraftedBy'] = team_name
+                row = self.bat_df.loc[mask].iloc[0]
+                
+            else:
+                return False # Player not found
 
         # Create Player Object
         stats = row.to_dict()
@@ -49,9 +85,9 @@ class DraftEngine:
             name=row['Name'],
             position=row['POS'],
             team_mlb=row['Team'],
-            dollars=row.get('Dollars', 0),  # Keeper Cost
+            dollars=cost,  # Use keeper cost parameter (not DataFrame 'Dollars' which is projected value)
             stats=stats,
-            is_pitcher=is_pitcher
+            is_pitcher=determined_is_pitcher
         )
         
         # Add to Team (Mark as keeper)
@@ -332,7 +368,7 @@ class DraftEngine:
             Dictionary with keys:
             - team_names: List of team names
             - keepers: Dict mapping team names to lists of keeper dicts
-                      Each keeper dict has 'player_id' and 'cost' keys
+                      Each keeper dict has 'player_id', 'cost', and 'is_pitcher' keys
         """
         keepers = {}
         
@@ -340,23 +376,31 @@ class DraftEngine:
             team_keepers = []
             for player in team.roster:
                 # Check if player is a keeper by looking at their status in DataFrame
+                # Note: player.player_id is a string, but DataFrame PlayerId may be int
+                try:
+                    pid = int(player.player_id)
+                except (ValueError, TypeError):
+                    pid = player.player_id
+                
                 if player.is_pitcher:
-                    mask = self.pitch_df['PlayerId'] == player.player_id
+                    mask = self.pitch_df['PlayerId'] == pid
                     if not self.pitch_df.loc[mask].empty:
                         status = self.pitch_df.loc[mask, 'Status'].iloc[0]
                         if status == 'Keeper':
                             team_keepers.append({
                                 "player_id": player.player_id,
-                                "cost": player.dollars
+                                "cost": player.dollars,
+                                "is_pitcher": True
                             })
                 else:
-                    mask = self.bat_df['PlayerId'] == player.player_id
+                    mask = self.bat_df['PlayerId'] == pid
                     if not self.bat_df.loc[mask].empty:
                         status = self.bat_df.loc[mask, 'Status'].iloc[0]
                         if status == 'Keeper':
                             team_keepers.append({
                                 "player_id": player.player_id,
-                                "cost": player.dollars
+                                "cost": player.dollars,
+                                "is_pitcher": False
                             })
             
             if team_keepers:
@@ -374,6 +418,8 @@ class DraftEngine:
             config: Dictionary with keys:
                    - team_names: List of team names
                    - keepers: Dict mapping team names to lists of keeper dicts
+                             Each keeper dict should have 'player_id' and 'cost' keys,
+                             and optionally 'is_pitcher' for dual-position players
                    
         Returns:
             True if import was successful, False otherwise
@@ -395,9 +441,12 @@ class DraftEngine:
                 for keeper_data in keeper_list:
                     player_id = keeper_data.get("player_id")
                     cost = keeper_data.get("cost", 0.0)
+                    # Get is_pitcher if available (for dual-position players)
+                    # If not present, process_keeper will use legacy fallback behavior
+                    is_pitcher = keeper_data.get("is_pitcher", None)
                     
                     if player_id:
-                        self.process_keeper(player_id, team_name, cost)
+                        self.process_keeper(player_id, team_name, cost, is_pitcher=is_pitcher)
             
             return True
             
