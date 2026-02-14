@@ -386,11 +386,16 @@ class DraftEngine:
             team_keepers = []
             for player in team.roster:
                 # Check if player is a keeper by looking at their status in DataFrame
-                # Note: player.player_id is a string, but DataFrame PlayerId may be int
-                try:
-                    pid = int(player.player_id)
-                except (ValueError, TypeError):
-                    pid = player.player_id
+                # Note: player.player_id is a string, but DataFrame PlayerId may be int or str
+                # Normalize to match DataFrame type
+                df_type = self.bat_df['PlayerId'].dtype
+                if 'int' in str(df_type):
+                    try:
+                        pid = int(player.player_id)
+                    except (ValueError, TypeError):
+                        pid = player.player_id
+                else:
+                    pid = str(player.player_id) if player.player_id is not None else player.player_id
                 
                 if player.is_pitcher:
                     mask = self.pitch_df['PlayerId'] == pid
