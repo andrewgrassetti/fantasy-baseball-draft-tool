@@ -88,6 +88,54 @@ class DraftEngine:
         
         self.teams[team_name].add_player(new_player)
 
+    def undo_pick(self, player_id: str) -> bool:
+        """Undoes a draft pick by reverting the player to Available status.
+        
+        Args:
+            player_id: The unique identifier of the player to undo
+            
+        Returns:
+            True if the pick was successfully undone, False otherwise
+        """
+        # Determine if player is a batter or pitcher and check if they're drafted
+        df = None
+        
+        # Check pitchers
+        if player_id in self.pitch_df['PlayerId'].values:
+            mask = self.pitch_df['PlayerId'] == player_id
+            row = self.pitch_df.loc[mask].iloc[0]
+            
+            # Only undo if status is 'Drafted' (not 'Keeper')
+            if row['Status'] == 'Drafted':
+                df = self.pitch_df
+            else:
+                return False  # Cannot undo keepers or available players
+        
+        # Check batters
+        elif player_id in self.bat_df['PlayerId'].values:
+            mask = self.bat_df['PlayerId'] == player_id
+            row = self.bat_df.loc[mask].iloc[0]
+            
+            # Only undo if status is 'Drafted' (not 'Keeper')
+            if row['Status'] == 'Drafted':
+                df = self.bat_df
+            else:
+                return False  # Cannot undo keepers or available players
+        else:
+            return False  # Player not found
+        
+        # Reset DataFrame status
+        mask = df['PlayerId'] == player_id
+        df.loc[mask, 'Status'] = 'Available'
+        df.loc[mask, 'DraftedBy'] = None
+        
+        # Find which team has this player and remove from roster
+        for team_name, team in self.teams.items():
+            if team.remove_player(player_id):
+                return True
+        
+        return False
+
     def get_standings(self):
         """Returns a DataFrame of the current 5x5 standings."""
         data = []

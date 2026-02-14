@@ -56,6 +56,38 @@ with tab1:
             engine.process_pick(pid, drafting_team, is_pitcher)
             st.success(f"Drafted {selected_label} to {drafting_team}")
             st.rerun()
+        
+        # --- UNDO PICK SECTION ---
+        st.divider()
+        st.header("Undo Pick")
+        
+        # Get all drafted players (not keepers)
+        drafted_bat = engine.bat_df[engine.bat_df['Status'] == 'Drafted']
+        drafted_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Drafted']
+        
+        # Create a display string: "Name (POS) — Team Name"
+        undo_options = {}  # Map "Display Name" -> player_id
+        
+        for _, row in drafted_bat.iterrows():
+            label = f"{row['Name']} ({row['POS']}) — {row['DraftedBy']}"
+            undo_options[label] = row['PlayerId']
+        
+        for _, row in drafted_pitch.iterrows():
+            label = f"{row['Name']} (P) — {row['DraftedBy']}"
+            undo_options[label] = row['PlayerId']
+        
+        if undo_options:
+            selected_undo_label = st.selectbox("Select Drafted Player to Undo", options=list(undo_options.keys()))
+            
+            if st.button("⚠️ Undo Pick", type="secondary"):
+                undo_pid = undo_options[selected_undo_label]
+                if engine.undo_pick(undo_pid):
+                    st.success(f"Undone: {selected_undo_label}")
+                    st.rerun()
+                else:
+                    st.error("Failed to undo pick. Player may be a keeper or not found.")
+        else:
+            st.info("No drafted players to undo.")
 
     with col2:
         st.header("Live Standings (5x5)")

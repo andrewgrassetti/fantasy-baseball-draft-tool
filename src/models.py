@@ -87,6 +87,40 @@ class Team:
             self.slots_filled['BN'] += 1
             assigned = True
 
+    def remove_player(self, player_id: str) -> bool:
+        """Removes a player from the roster and rebuilds slots_filled.
+        
+        Args:
+            player_id: The unique identifier of the player to remove
+            
+        Returns:
+            True if player was found and removed, False otherwise
+        """
+        # Find the player in the roster
+        player_to_remove = None
+        for player in self.roster:
+            if player.player_id == player_id:
+                player_to_remove = player
+                break
+        
+        if player_to_remove is None:
+            return False
+        
+        # Remove the player from the roster
+        self.roster.remove(player_to_remove)
+        
+        # Rebuild slots_filled from scratch to ensure accuracy
+        self.slots_filled = {k: 0 for k in self.SLOT_LIMITS}
+        
+        # Re-add all remaining players to recalculate slot assignments
+        remaining_players = self.roster.copy()
+        self.roster = []
+        
+        for player in remaining_players:
+            self.add_player(player)
+        
+        return True
+
     @property
     def live_totals(self) -> Dict[str, float]:
         """Calculates the 5x5 category totals."""
