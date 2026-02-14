@@ -24,11 +24,12 @@ class DraftEngine:
         Args:
             player_id: The unique identifier of the player (can be int or str)
             team_name: The team to assign the keeper to
-            cost: The keeper cost (default: 0.0)
+            cost: The keeper cost (default: 0.0) - this overrides the DataFrame Dollars field
             is_pitcher: Whether the player is a pitcher (True) or batter (False).
                        If None, will check pitchers first, then batters (legacy behavior).
         """
         row = None
+        determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)
         
         # Normalize player_id to match the DataFrame type
         # Try to convert to int if it's a string that looks like a number
@@ -60,7 +61,7 @@ class DraftEngine:
         else:
             # Legacy behavior: check pitchers first, then batters
             if pid in self.pitch_df['PlayerId'].values:
-                is_pitcher = True
+                determined_is_pitcher = True
                 mask = self.pitch_df['PlayerId'] == pid
                 self.pitch_df.loc[mask, 'Status'] = 'Keeper'
                 self.pitch_df.loc[mask, 'DraftedBy'] = team_name
@@ -68,7 +69,7 @@ class DraftEngine:
                 
             # Check Batters
             elif pid in self.bat_df['PlayerId'].values:
-                is_pitcher = False
+                determined_is_pitcher = False
                 mask = self.bat_df['PlayerId'] == pid
                 self.bat_df.loc[mask, 'Status'] = 'Keeper'
                 self.bat_df.loc[mask, 'DraftedBy'] = team_name
@@ -84,9 +85,9 @@ class DraftEngine:
             name=row['Name'],
             position=row['POS'],
             team_mlb=row['Team'],
-            dollars=cost,  # Use the cost parameter, not the DataFrame value
+            dollars=cost,  # Use keeper cost parameter (not DataFrame 'Dollars' which is projected value)
             stats=stats,
-            is_pitcher=is_pitcher
+            is_pitcher=determined_is_pitcher
         )
         
         # Add to Team (Mark as keeper)
