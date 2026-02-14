@@ -18,6 +18,29 @@ class DraftEngine:
                           "Team 6", "Team 7", "Team 8", "Team 9", "Team 10", "Team 11", "Team 12"]
         self.teams = {name: Team(name) for name in team_names}
 
+    def _normalize_player_id(self, player_id):
+        """Normalize player_id to match DataFrame PlayerId dtype.
+        
+        Args:
+            player_id: The player ID to normalize (can be int or str)
+            
+        Returns:
+            Normalized player_id that matches the DataFrame PlayerId type
+        """
+        # Check the DataFrame type (both bat and pitch should have same type)
+        df_type = self.bat_df['PlayerId'].dtype
+        
+        if 'int' in str(df_type):
+            # DataFrame has integers, try to convert player_id to int
+            try:
+                return int(player_id)
+            except (ValueError, TypeError):
+                return player_id
+        else:
+            # DataFrame has strings (or other), ensure player_id is string
+            return str(player_id) if player_id is not None else player_id
+
+
     def process_keeper(self, player_id, team_name, cost=0.0, is_pitcher=None):
         """Forces a player onto a team as a keeper.
         
@@ -32,21 +55,7 @@ class DraftEngine:
         determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)
         
         # Normalize player_id to match the DataFrame type
-        # The DataFrame PlayerId might be int or str depending on how data was loaded
-        # We'll try both the original value and converted types during lookup
-        # First, determine what type to use by checking the DataFrame
-        df_type = self.bat_df['PlayerId'].dtype
-        
-        # Try to match the DataFrame type
-        if 'int' in str(df_type):
-            # DataFrame has integers, try to convert player_id to int
-            try:
-                pid = int(player_id)
-            except (ValueError, TypeError):
-                pid = player_id
-        else:
-            # DataFrame has strings (or other), ensure player_id is string
-            pid = str(player_id) if player_id is not None else player_id
+        pid = self._normalize_player_id(player_id)
         
         # If is_pitcher is explicitly specified, check only the appropriate dataframe
         if is_pitcher is not None:
@@ -284,12 +293,15 @@ class DraftEngine:
             removed_team = old_teams[removed_name]
             for player in removed_team.roster:
                 # Find player in appropriate DataFrame and reset status
+                # Normalize player_id to match DataFrame type
+                pid = self._normalize_player_id(player.player_id)
+                
                 if player.is_pitcher:
-                    mask = self.pitch_df['PlayerId'] == player.player_id
+                    mask = self.pitch_df['PlayerId'] == pid
                     self.pitch_df.loc[mask, 'Status'] = 'Available'
                     self.pitch_df.loc[mask, 'DraftedBy'] = None
                 else:
-                    mask = self.bat_df['PlayerId'] == player.player_id
+                    mask = self.bat_df['PlayerId'] == pid
                     self.bat_df.loc[mask, 'Status'] = 'Available'
                     self.bat_df.loc[mask, 'DraftedBy'] = None
         
@@ -386,16 +398,8 @@ class DraftEngine:
             team_keepers = []
             for player in team.roster:
                 # Check if player is a keeper by looking at their status in DataFrame
-                # Note: player.player_id is a string, but DataFrame PlayerId may be int or str
-                # Normalize to match DataFrame type
-                df_type = self.bat_df['PlayerId'].dtype
-                if 'int' in str(df_type):
-                    try:
-                        pid = int(player.player_id)
-                    except (ValueError, TypeError):
-                        pid = player.player_id
-                else:
-                    pid = str(player.player_id) if player.player_id is not None else player.player_id
+                # Normalize player_id to match DataFrame type
+                pid = self._normalize_player_id(player.player_id)
                 
                 if player.is_pitcher:
                     mask = self.pitch_df['PlayerId'] == pid
