@@ -1,9 +1,108 @@
 import pandas as pd
 import os
 
+# --- COLUMN DEFINITIONS (matching R script) ---
+COLUMNS_TO_KEEP = {
+    'batting': ['AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'ADP', 'PlayerId'],
+    'pitching': ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'ADP', 'PlayerId'],
+    'auction': ['Name', 'POS', 'PlayerId', 'Dollars'],
+    'statcast': ['PlayerId', 'Barrel%', 'maxEV']
+}
+
+# Average patterns (columns to collapse via row-wise mean)
+BATTING_AVERAGES = ['AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'ADP', 'Dollars']
+PITCHING_AVERAGES = ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'ADP', 'Dollars']
+
+
+def _safe_read_csv(path):
+    """Safely read CSV with encoding fallback."""
+    if not os.path.exists(path):
+        return None
+    try:
+        return pd.read_csv(path, encoding='utf-8-sig')
+    except UnicodeDecodeError:
+        return pd.read_csv(path, encoding='latin-1')
+
+
+def _standardize_columns(df):
+    """Standardize column name variations to canonical forms."""
+    rename_map = {
+        'Pos': 'POS',
+        'Position': 'POS',
+        'playerid': 'PlayerId',
+        'wRC.': 'wRC+',
+        'Barrel.': 'Barrel%',
+        'K.9': 'K/9'
+    }
+    df = df.rename(columns=rename_map)
+    
+    # Ensure PlayerId is string for consistent merging
+    if 'PlayerId' in df.columns:
+        df['PlayerId'] = df['PlayerId'].astype(str)
+    
+    return df
+
+
+def _filter_columns(df, keep_cols):
+    """Filter DataFrame to only specified columns that exist."""
+    if df is None:
+        return None
+    available_cols = [col for col in keep_cols if col in df.columns]
+    if not available_cols:
+        return None
+    return df[available_cols].copy()
+
+
+def _merge_dfs(df_list, by_col='PlayerId'):
+    """
+    Sequentially merge DataFrames with deterministic suffixes for duplicate columns.
+    Mimics R's Reduce(merge, ..., all=TRUE).
+    Uses suffixes based on merge index for reproducibility.
+    """
+    if not df_list:
+        return pd.DataFrame()
+    
+    # Filter out None values
+    df_list = [df for df in df_list if df is not None and not df.empty]
+    
+    if not df_list:
+        return pd.DataFrame()
+    
+    result = df_list[0]
+    
+    for idx, df in enumerate(df_list[1:], start=1):
+        # Use deterministic suffix based on merge index
+        suffix = f's{idx}'
+        result = pd.merge(result, df, on=by_col, how='outer', suffixes=('', f'.{suffix}'))
+    
+    return result
+
+
+def _average_columns(df, patterns, digits=3):
+    """
+    Row-wise average columns matching each pattern.
+    Mimics R's rowMeans(..., na.rm=TRUE).
+    For each pattern, finds base column and all suffixed variants (e.g., 'HR', 'HR.s1', 'HR.s2'),
+    then computes row mean.
+    """
+    for pattern in patterns:
+        # Find all columns matching this pattern (base + suffixed versions with .sN format)
+        # Must match exact pattern or pattern with suffix like ".s1", ".s2", etc.
+        import re
+        pattern_regex = re.compile(f'^{re.escape(pattern)}(\\.s\\d+)?$')
+        matching_cols = [col for col in df.columns if pattern_regex.match(col)]
+        
+        if len(matching_cols) > 0:
+            # Compute row-wise mean, ignoring NaN values
+            df[pattern] = df[matching_cols].mean(axis=1, skipna=True).round(digits)
+    
+    return df
+
+
 def load_and_merge_data(data_dir="data"):
     """
-    Loads projection CSVs AND Auction Value CSVs, safely merging metadata.
+    Loads projection CSVs AND Auction Value CSVs using wide merge strategy.
+    Matches the logic from the R script for proper row-wise averaging.
     """
     
     # --- FILE CONFIGURATION ---
@@ -18,132 +117,196 @@ def load_and_merge_data(data_dir="data"):
     
     auction_bat_file = "2025_batx_auction_bat.csv"
     auction_pitch_file = "2025_oopsy_auction_pitch.csv"
-
-    # --- ROBUST COLUMN DEFINITIONS ---
-    # We list possible names for key columns to handle capitalization differences
-    # format: 'TargetName': ['PossibleName1', 'PossibleName2']
     
-    # 1. Batting Projections (Numeric stats only)
-    bat_stat_cols = ['AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'ADP']
+    # Extract year from projection files and use previous year for statcast
+    # Statcast data is always from the prior season
+    import re
+    year_match = re.search(r'(\d{4})_', batting_files[0])
+    if year_match:
+        projection_year = int(year_match.group(1))
+        statcast_year = projection_year - 1
+        statcast_bat_file = f"{statcast_year}_statcast_bat.csv"
+    else:
+        # Fallback if year pattern not found
+        statcast_bat_file = "2024_statcast_bat.csv"
     
-    # 2. Pitching Projections (Numeric stats only)
-    pitch_stat_cols = ['IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'ADP']
-
-    # --- HELPER: SAFE LOAD ---
-    def load_group(filenames, required_stats):
-        dfs = []
-        for f in filenames:
-            path = os.path.join(data_dir, f)
-            if os.path.exists(path):
-                # Load carefully
-                try:
-                    df = pd.read_csv(path, encoding='utf-8-sig') # Handle special chars
-                except UnicodeDecodeError:
-                    df = pd.read_csv(path, encoding='latin-1')
-
-                # Rename columns to standard names if needed (e.g. "Pos" -> "POS")
-                df.rename(columns={'Pos': 'POS', 'Position': 'POS', 'playerid': 'PlayerId'}, inplace=True)
-
-                # Filter for PlayerId + Stats that exist in this file
-                cols_to_grab = ['PlayerId'] + [c for c in required_stats if c in df.columns]
-                
-                # Also try to grab metadata if it exists (Name, Team)
-                for meta in ['Name', 'Team', 'POS']:
-                    if meta in df.columns:
-                        cols_to_grab.append(meta)
-
-                dfs.append(df[cols_to_grab])
-        
-        if not dfs:
-            return pd.DataFrame()
-        return pd.concat(dfs, ignore_index=True)
-
     # --- PROCESS BATTERS ---
-    raw_bat = load_group(batting_files, bat_stat_cols)
-    if raw_bat.empty:
-        raise FileNotFoundError("No batting projection files found!")
-
-    # 1. Average the numeric stats
-    bat_final = raw_bat.groupby('PlayerId').mean(numeric_only=True).reset_index()
     
-    # 2. Extract Metadata (Name, Team) from projections if available
-    # We drop 'POS' from here because it might be missing
-    meta_cols = [c for c in ['PlayerId', 'Name', 'Team'] if c in raw_bat.columns]
-    bat_meta = raw_bat[meta_cols].drop_duplicates('PlayerId')
-    bat_final = pd.merge(bat_final, bat_meta, on='PlayerId', how='left')
-
-    # 3. Load Auction File (CRITICAL: Get POS from here if needed)
-    auc_bat_path = os.path.join(data_dir, auction_bat_file)
-    if os.path.exists(auc_bat_path):
-        auc_df = pd.read_csv(auc_bat_path)
-        auc_df.rename(columns={'Pos': 'POS', 'Position': 'POS'}, inplace=True)
-        
-        # We need PlayerId, Dollars, and POS (if we don't have it yet)
-        auc_cols = ['PlayerId', 'Dollars']
-        if 'POS' in auc_df.columns:
-            auc_cols.append('POS')
-        
-        auc_subset = auc_df[auc_cols]
-        bat_final = pd.merge(bat_final, auc_subset, on='PlayerId', how='left')
-        
-        # Fill missing Dollars with 0
-        bat_final['Dollars'] = bat_final['Dollars'].fillna(0)
+    # 1. Load and filter auction (base of merge chain)
+    bat_auc_path = os.path.join(data_dir, auction_bat_file)
+    bat_auc = _safe_read_csv(bat_auc_path)
+    if bat_auc is not None:
+        bat_auc = _standardize_columns(bat_auc)
+        bat_auc = _filter_columns(bat_auc, COLUMNS_TO_KEEP['auction'])
+    
+    # 2. Load and filter projection sources
+    bat_projections = []
+    for f in batting_files:
+        path = os.path.join(data_dir, f)
+        df = _safe_read_csv(path)
+        if df is not None:
+            df = _standardize_columns(df)
+            df = _filter_columns(df, COLUMNS_TO_KEEP['batting'])
+            if df is not None:
+                bat_projections.append(df)
+    
+    # 3. Load and filter statcast
+    statcast_path = os.path.join(data_dir, statcast_bat_file)
+    statcast_bat = _safe_read_csv(statcast_path)
+    if statcast_bat is not None:
+        statcast_bat = _standardize_columns(statcast_bat)
+        statcast_bat = _filter_columns(statcast_bat, COLUMNS_TO_KEEP['statcast'])
+    
+    # 4. Wide merge: auction + projections + statcast
+    merge_list = []
+    if bat_auc is not None:
+        merge_list.append(bat_auc)
+    merge_list.extend(bat_projections)
+    if statcast_bat is not None:
+        merge_list.append(statcast_bat)
+    
+    if not merge_list:
+        raise FileNotFoundError("No batting data files found!")
+    
+    bat_merged = _merge_dfs(merge_list, by_col='PlayerId')
+    
+    # 5. Row-wise averaging
+    bat_merged = _average_columns(bat_merged, BATTING_AVERAGES, digits=3)
+    
+    # 6. Add Barrel_prc if Barrel% exists
+    # Note: Barrel% from statcast is a decimal (0-1, e.g., 0.268 = 26.8% barrel rate)
+    # Barrel_prc converts to percentage scale (0-100) for easier interpretation
+    # Keeping both for flexibility in downstream visualizations
+    if 'Barrel%' in bat_merged.columns:
+        bat_merged['Barrel_prc'] = (bat_merged['Barrel%'] * 100).round(3)
+    
+    # 7. Ensure downstream compatibility columns
+    bat_merged['Type'] = 'Batter'
+    
+    # Fill Dollars with 0 if missing
+    if 'Dollars' not in bat_merged.columns:
+        bat_merged['Dollars'] = 0
     else:
-        bat_final['Dollars'] = 0
-
-    # 4. Fallback for missing POS (Default to 'Unknown' so app doesn't crash)
-    if 'POS' not in bat_final.columns:
-        bat_final['POS'] = 'Unknown'
+        bat_merged['Dollars'] = bat_merged['Dollars'].fillna(0)
+    
+    # Ensure POS exists
+    if 'POS' not in bat_merged.columns:
+        bat_merged['POS'] = 'Unknown'
     else:
-        # If POS came from both files, pandas creates POS_x and POS_y. Coalesce them.
-        if 'POS_x' in bat_final.columns and 'POS_y' in bat_final.columns:
-            bat_final['POS'] = bat_final['POS_y'].combine_first(bat_final['POS_x'])
-            bat_final.drop(columns=['POS_x', 'POS_y'], inplace=True)
-
-    bat_final['Type'] = 'Batter'
-
+        bat_merged['POS'] = bat_merged['POS'].fillna('Unknown')
+    
+    # Add Team column if missing (extract from first available metadata)
+    if 'Team' not in bat_merged.columns:
+        # Try to get Team from any projection file
+        for f in batting_files:
+            path = os.path.join(data_dir, f)
+            df = _safe_read_csv(path)
+            if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
+                df = _standardize_columns(df)
+                team_map = df[['PlayerId', 'Team']].drop_duplicates('PlayerId')
+                bat_merged = pd.merge(bat_merged, team_map, on='PlayerId', how='left')
+                break
+    
+    # Add Name column if missing
+    if 'Name' not in bat_merged.columns:
+        for f in [auction_bat_file] + batting_files:
+            path = os.path.join(data_dir, f)
+            df = _safe_read_csv(path)
+            if df is not None and 'Name' in df.columns and 'PlayerId' in df.columns:
+                df = _standardize_columns(df)
+                name_map = df[['PlayerId', 'Name']].drop_duplicates('PlayerId')
+                bat_merged = pd.merge(bat_merged, name_map, on='PlayerId', how='left')
+                break
+    
+    # Select final columns (only those that exist)
+    bat_final_cols = ['Name', 'POS', 'PlayerId', 'Team', 'Type', 
+                     'AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 
+                     'ADP', 'Dollars', 'maxEV', 'Barrel_prc']
+    bat_final_cols = [col for col in bat_final_cols if col in bat_merged.columns]
+    bat_final = bat_merged[bat_final_cols].copy()
+    
     # --- PROCESS PITCHERS ---
-    raw_pitch = load_group(pitching_files, pitch_stat_cols)
-    if raw_pitch.empty:
-        raise FileNotFoundError("No pitching projection files found!")
-
-    # 1. Average Stats
-    pitch_final = raw_pitch.groupby('PlayerId').mean(numeric_only=True).reset_index()
     
-    # 2. Metadata
-    meta_cols = [c for c in ['PlayerId', 'Name', 'Team'] if c in raw_pitch.columns]
-    pitch_meta = raw_pitch[meta_cols].drop_duplicates('PlayerId')
-    pitch_final = pd.merge(pitch_final, pitch_meta, on='PlayerId', how='left')
-
-    # 3. Auction File
-    auc_pitch_path = os.path.join(data_dir, auction_pitch_file)
-    if os.path.exists(auc_pitch_path):
-        auc_df = pd.read_csv(auc_pitch_path)
-        auc_df.rename(columns={'Pos': 'POS', 'Position': 'POS'}, inplace=True)
-        
-        auc_cols = ['PlayerId', 'Dollars']
-        # Pitchers usually just default to 'P', but we grab POS if there
-        if 'POS' in auc_df.columns:
-            auc_cols.append('POS')
-
-        auc_subset = auc_df[auc_cols]
-        pitch_final = pd.merge(pitch_final, auc_subset, on='PlayerId', how='left')
-        pitch_final['Dollars'] = pitch_final['Dollars'].fillna(0)
-    else:
-        pitch_final['Dollars'] = 0
+    # 1. Load and filter auction (base of merge chain)
+    pitch_auc_path = os.path.join(data_dir, auction_pitch_file)
+    pitch_auc = _safe_read_csv(pitch_auc_path)
+    if pitch_auc is not None:
+        pitch_auc = _standardize_columns(pitch_auc)
+        pitch_auc = _filter_columns(pitch_auc, COLUMNS_TO_KEEP['auction'])
     
-    # 4. Fallback POS
-    if 'POS' not in pitch_final.columns:
-        pitch_final['POS'] = 'P'
+    # 2. Load and filter projection sources
+    pitch_projections = []
+    for f in pitching_files:
+        path = os.path.join(data_dir, f)
+        df = _safe_read_csv(path)
+        if df is not None:
+            df = _standardize_columns(df)
+            df = _filter_columns(df, COLUMNS_TO_KEEP['pitching'])
+            if df is not None:
+                pitch_projections.append(df)
+    
+    # 3. Wide merge: auction + projections
+    merge_list = []
+    if pitch_auc is not None:
+        merge_list.append(pitch_auc)
+    merge_list.extend(pitch_projections)
+    
+    if not merge_list:
+        raise FileNotFoundError("No pitching data files found!")
+    
+    pitch_merged = _merge_dfs(merge_list, by_col='PlayerId')
+    
+    # 4. Row-wise averaging
+    pitch_merged = _average_columns(pitch_merged, PITCHING_AVERAGES, digits=3)
+    
+    # 5. Ensure downstream compatibility columns
+    pitch_merged['Type'] = 'Pitcher'
+    
+    # Fill Dollars with 0 if missing
+    if 'Dollars' not in pitch_merged.columns:
+        pitch_merged['Dollars'] = 0
     else:
-        if 'POS_x' in pitch_final.columns and 'POS_y' in pitch_final.columns:
-            pitch_final['POS'] = pitch_final['POS_y'].combine_first(pitch_final['POS_x'])
-            pitch_final.drop(columns=['POS_x', 'POS_y'], inplace=True)
-
-    pitch_final['Type'] = 'Pitcher'
-
-    # --- REVERSE ENGINEERING (ERA/WHIP) ---
-    pitch_final['ER'] = (pitch_final['ERA'] * pitch_final['IP']) / 9
-    pitch_final['H_BB'] = pitch_final['WHIP'] * pitch_final['IP']
-
+        pitch_merged['Dollars'] = pitch_merged['Dollars'].fillna(0)
+    
+    # Ensure POS exists (default to 'P' for pitchers)
+    if 'POS' not in pitch_merged.columns:
+        pitch_merged['POS'] = 'P'
+    else:
+        pitch_merged['POS'] = pitch_merged['POS'].fillna('P')
+    
+    # Add Team column if missing
+    if 'Team' not in pitch_merged.columns:
+        for f in pitching_files:
+            path = os.path.join(data_dir, f)
+            df = _safe_read_csv(path)
+            if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
+                df = _standardize_columns(df)
+                team_map = df[['PlayerId', 'Team']].drop_duplicates('PlayerId')
+                pitch_merged = pd.merge(pitch_merged, team_map, on='PlayerId', how='left')
+                break
+    
+    # Add Name column if missing
+    if 'Name' not in pitch_merged.columns:
+        for f in [auction_pitch_file] + pitching_files:
+            path = os.path.join(data_dir, f)
+            df = _safe_read_csv(path)
+            if df is not None and 'Name' in df.columns and 'PlayerId' in df.columns:
+                df = _standardize_columns(df)
+                name_map = df[['PlayerId', 'Name']].drop_duplicates('PlayerId')
+                pitch_merged = pd.merge(pitch_merged, name_map, on='PlayerId', how='left')
+                break
+    
+    # Reverse engineering for ERA/WHIP
+    if 'ERA' in pitch_merged.columns and 'IP' in pitch_merged.columns:
+        pitch_merged['ER'] = (pitch_merged['ERA'] * pitch_merged['IP']) / 9
+    if 'WHIP' in pitch_merged.columns and 'IP' in pitch_merged.columns:
+        pitch_merged['H_BB'] = pitch_merged['WHIP'] * pitch_merged['IP']
+    
+    # Select final columns (only those that exist)
+    pitch_final_cols = ['Name', 'POS', 'PlayerId', 'Team', 'Type',
+                       'IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 
+                       'ADP', 'Dollars', 'ER', 'H_BB']
+    pitch_final_cols = [col for col in pitch_final_cols if col in pitch_merged.columns]
+    pitch_final = pitch_merged[pitch_final_cols].copy()
+    
     return bat_final, pitch_final
