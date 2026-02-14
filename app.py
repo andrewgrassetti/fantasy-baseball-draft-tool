@@ -224,7 +224,8 @@ with tab0:
                 created_date = cfg['created_at']
                 if created_date != 'Unknown':
                     created_date = created_date[:10]  # Extract YYYY-MM-DD
-                display_name = f"{cfg['name']} ({created_date})"
+                # Include the filename in the display for clarity
+                display_name = f"{cfg['name']} ({cfg['filename']})"
                 config_options[display_name] = cfg['filepath']
             
             selected_config = st.selectbox(

@@ -18,25 +18,61 @@ class DraftEngine:
                           "Team 6", "Team 7", "Team 8", "Team 9", "Team 10", "Team 11", "Team 12"]
         self.teams = {name: Team(name) for name in team_names}
 
+    def _normalize_player_id(self, player_id):
+        """Normalize player_id to match DataFrame PlayerId dtype.
+        
+        Args:
+            player_id: The player ID to normalize (can be int or str)
+            
+        Returns:
+            Normalized player_id that matches the DataFrame PlayerId type.
+            Returns None if player_id is None.
+            
+        Note:
+            If DataFrame has integer PlayerId, attempts to convert player_id to int.
+            If conversion fails, returns the original value.
+            If DataFrame has string PlayerId, converts to string.
+        """
+        if player_id is None:
+            return None
+            
+        # Check the DataFrame type (both bat and pitch should have same type)
+        df_type = self.bat_df['PlayerId'].dtype
+        
+        if 'int' in str(df_type):
+            # DataFrame has integers, try to convert player_id to int
+            try:
+                return int(player_id)
+            except (ValueError, TypeError):
+                return player_id
+        else:
+            # DataFrame has strings (or other), ensure player_id is string
+            return str(player_id)
+
+
     def process_keeper(self, player_id, team_name, cost=0.0, is_pitcher=None):
         """Forces a player onto a team as a keeper.
         
         Args:
-            player_id: The unique identifier of the player (can be int or str)
+            player_id: The unique identifier of the player (can be int or str).
+                      Will be normalized to match the DataFrame PlayerId dtype.
             team_name: The team to assign the keeper to
             cost: The keeper cost (default: 0.0) - this overrides the DataFrame Dollars field
             is_pitcher: Whether the player is a pitcher (True) or batter (False).
                        If None, will check pitchers first, then batters (legacy behavior).
+        
+        Returns:
+            True if the keeper was successfully processed, False if player not found.
+            
+        Note:
+            Player ID will be automatically converted to match DataFrame type (int or str).
+            If the player_id cannot be found in either DataFrame, returns False.
         """
         row = None
         determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)
         
         # Normalize player_id to match the DataFrame type
-        # Try to convert to int if it's a string that looks like a number
-        try:
-            pid = int(player_id)
-        except (ValueError, TypeError):
-            pid = player_id
+        pid = self._normalize_player_id(player_id)
         
         # If is_pitcher is explicitly specified, check only the appropriate dataframe
         if is_pitcher is not None:
@@ -274,12 +310,15 @@ class DraftEngine:
             removed_team = old_teams[removed_name]
             for player in removed_team.roster:
                 # Find player in appropriate DataFrame and reset status
+                # Normalize player_id to match DataFrame type
+                pid = self._normalize_player_id(player.player_id)
+                
                 if player.is_pitcher:
-                    mask = self.pitch_df['PlayerId'] == player.player_id
+                    mask = self.pitch_df['PlayerId'] == pid
                     self.pitch_df.loc[mask, 'Status'] = 'Available'
                     self.pitch_df.loc[mask, 'DraftedBy'] = None
                 else:
-                    mask = self.bat_df['PlayerId'] == player.player_id
+                    mask = self.bat_df['PlayerId'] == pid
                     self.bat_df.loc[mask, 'Status'] = 'Available'
                     self.bat_df.loc[mask, 'DraftedBy'] = None
         
@@ -376,11 +415,8 @@ class DraftEngine:
             team_keepers = []
             for player in team.roster:
                 # Check if player is a keeper by looking at their status in DataFrame
-                # Note: player.player_id is a string, but DataFrame PlayerId may be int
-                try:
-                    pid = int(player.player_id)
-                except (ValueError, TypeError):
-                    pid = player.player_id
+                # Normalize player_id to match DataFrame type
+                pid = self._normalize_player_id(player.player_id)
                 
                 if player.is_pitcher:
                     mask = self.pitch_df['PlayerId'] == pid
