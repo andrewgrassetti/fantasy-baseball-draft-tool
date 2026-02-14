@@ -32,11 +32,21 @@ class DraftEngine:
         determined_is_pitcher = is_pitcher  # Track whether player is pitcher (may be determined later)
         
         # Normalize player_id to match the DataFrame type
-        # Try to convert to int if it's a string that looks like a number
-        try:
-            pid = int(player_id)
-        except (ValueError, TypeError):
-            pid = player_id
+        # The DataFrame PlayerId might be int or str depending on how data was loaded
+        # We'll try both the original value and converted types during lookup
+        # First, determine what type to use by checking the DataFrame
+        df_type = self.bat_df['PlayerId'].dtype
+        
+        # Try to match the DataFrame type
+        if 'int' in str(df_type):
+            # DataFrame has integers, try to convert player_id to int
+            try:
+                pid = int(player_id)
+            except (ValueError, TypeError):
+                pid = player_id
+        else:
+            # DataFrame has strings (or other), ensure player_id is string
+            pid = str(player_id) if player_id is not None else player_id
         
         # If is_pitcher is explicitly specified, check only the appropriate dataframe
         if is_pitcher is not None:

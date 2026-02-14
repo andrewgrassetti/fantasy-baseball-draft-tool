@@ -89,6 +89,7 @@ def list_saved_configs(saves_dir: str = "saves") -> List[Dict]:
     Returns:
         List of dictionaries, each containing:
         - name: Configuration name
+        - filename: The actual filename (e.g., "Keepers_2026.json")
         - filepath: Full path to the configuration file
         - created_at: ISO timestamp of creation
         
@@ -109,6 +110,7 @@ def list_saved_configs(saves_dir: str = "saves") -> List[Dict]:
                 config = load_keeper_config(filepath)
                 configs.append({
                     "name": config.get("name", filename),
+                    "filename": filename,
                     "filepath": filepath,
                     "created_at": config.get("created_at", "Unknown")
                 })
