@@ -107,16 +107,16 @@ def load_and_merge_data(data_dir="data"):
     
     # --- FILE CONFIGURATION ---
     batting_files = [
-        "2025_batx_bat.csv", "2025_steamer_bat.csv", 
-        "2025_zips_bat.csv", "2025_oopsy_bat.csv"
+        "2026_batx_bat.csv", "2026_steamer_bat.csv", 
+        "2026_zips_bat.csv", "2026_oopsy_bat.csv"
     ]
     pitching_files = [
-        "2025_batx_pitch.csv", "2025_steamer_pitch.csv", 
-        "2025_zips_pitch.csv", "2025_oopsy_pitch.csv"
+        "2026_batx_pitch.csv", "2026_steamer_pitch.csv", 
+        "2026_zips_pitch.csv", "2026_oopsy_pitch.csv"
     ]
     
-    auction_bat_file = "2025_batx_auction_bat.csv"
-    auction_pitch_file = "2025_oopsy_auction_pitch.csv"
+    auction_bat_file = "2026_batx_auction_bat.csv"
+    auction_pitch_file = "2026_oopsy_auction_pitch.csv"
     
     # Extract year from projection files and use previous year for statcast
     # Statcast data is always from the prior season
@@ -128,7 +128,7 @@ def load_and_merge_data(data_dir="data"):
         statcast_bat_file = f"{statcast_year}_statcast_bat.csv"
     else:
         # Fallback if year pattern not found
-        statcast_bat_file = "2024_statcast_bat.csv"
+        statcast_bat_file = "2025_statcast_bat.csv"
     
     # --- PROCESS BATTERS ---
     
