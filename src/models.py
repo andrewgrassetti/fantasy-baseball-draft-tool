@@ -87,11 +87,13 @@ class Team:
             self.slots_filled['BN'] += 1
             assigned = True
 
-    def remove_player(self, player_id: str) -> bool:
+    def remove_player(self, player_id: str, is_pitcher: bool = None) -> bool:
         """Removes a player from the roster and rebuilds slots_filled.
         
         Args:
             player_id: The unique identifier of the player to remove
+            is_pitcher: Optional flag to distinguish between pitcher/batter with same ID.
+                       If None, removes the first player with matching player_id.
             
         Returns:
             True if player was found and removed, False otherwise
@@ -100,8 +102,10 @@ class Team:
         player_to_remove = None
         for player in self.roster:
             if player.player_id == player_id:
-                player_to_remove = player
-                break
+                # If is_pitcher is specified, also check that it matches
+                if is_pitcher is None or player.is_pitcher == is_pitcher:
+                    player_to_remove = player
+                    break
         
         if player_to_remove is None:
             return False

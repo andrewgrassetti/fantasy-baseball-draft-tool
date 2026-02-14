@@ -100,6 +100,7 @@ class DraftEngine:
         """
         # Determine if player is a batter or pitcher and check if they're drafted
         df = None
+        is_pitcher = None
         
         # Check pitchers
         if player_id in self.pitch_df['PlayerId'].values:
@@ -109,6 +110,7 @@ class DraftEngine:
             # Only undo if status is 'Drafted' (not 'Keeper')
             if row['Status'] == 'Drafted':
                 df = self.pitch_df
+                is_pitcher = True
             else:
                 return False  # Cannot undo keepers or available players
         
@@ -120,6 +122,7 @@ class DraftEngine:
             # Only undo if status is 'Drafted' (not 'Keeper')
             if row['Status'] == 'Drafted':
                 df = self.bat_df
+                is_pitcher = False
             else:
                 return False  # Cannot undo keepers or available players
         else:
@@ -132,7 +135,7 @@ class DraftEngine:
         
         # Find which team has this player and remove from roster
         for team_name, team in self.teams.items():
-            if team.remove_player(player_id):
+            if team.remove_player(player_id, is_pitcher):
                 return True
         
         return False
@@ -246,11 +249,13 @@ class DraftEngine:
         
         self.teams = new_teams
 
-    def remove_keeper(self, player_id: str) -> bool:
+    def remove_keeper(self, player_id: str, is_pitcher: bool = None) -> bool:
         """Remove a keeper assignment and return the player to Available status.
         
         Args:
             player_id: The unique identifier of the keeper to remove
+            is_pitcher: Whether the player is a pitcher (True) or batter (False).
+                       If None, will check both dataframes (legacy behavior).
             
         Returns:
             True if the keeper was successfully removed, False otherwise
@@ -258,29 +263,55 @@ class DraftEngine:
         # Find the player and check if they're a keeper
         df = None
         
-        # Check pitchers
-        if player_id in self.pitch_df['PlayerId'].values:
-            mask = self.pitch_df['PlayerId'] == player_id
-            row = self.pitch_df.loc[mask].iloc[0]
-            
-            # Only remove if status is 'Keeper'
-            if row['Status'] == 'Keeper':
-                df = self.pitch_df
+        # If is_pitcher is specified, only check the appropriate dataframe
+        if is_pitcher is not None:
+            if is_pitcher:
+                # Check pitchers only
+                if player_id in self.pitch_df['PlayerId'].values:
+                    mask = self.pitch_df['PlayerId'] == player_id
+                    row = self.pitch_df.loc[mask].iloc[0]
+                    if row['Status'] == 'Keeper':
+                        df = self.pitch_df
+                    else:
+                        return False  # Not a keeper
+                else:
+                    return False  # Player not found
             else:
-                return False  # Not a keeper
-        
-        # Check batters
-        elif player_id in self.bat_df['PlayerId'].values:
-            mask = self.bat_df['PlayerId'] == player_id
-            row = self.bat_df.loc[mask].iloc[0]
-            
-            # Only remove if status is 'Keeper'
-            if row['Status'] == 'Keeper':
-                df = self.bat_df
-            else:
-                return False  # Not a keeper
+                # Check batters only
+                if player_id in self.bat_df['PlayerId'].values:
+                    mask = self.bat_df['PlayerId'] == player_id
+                    row = self.bat_df.loc[mask].iloc[0]
+                    if row['Status'] == 'Keeper':
+                        df = self.bat_df
+                    else:
+                        return False  # Not a keeper
+                else:
+                    return False  # Player not found
         else:
-            return False  # Player not found
+            # Legacy behavior: check pitchers first, then batters
+            # Check pitchers
+            if player_id in self.pitch_df['PlayerId'].values:
+                mask = self.pitch_df['PlayerId'] == player_id
+                row = self.pitch_df.loc[mask].iloc[0]
+                
+                # Only remove if status is 'Keeper'
+                if row['Status'] == 'Keeper':
+                    df = self.pitch_df
+                else:
+                    return False  # Not a keeper
+            
+            # Check batters
+            elif player_id in self.bat_df['PlayerId'].values:
+                mask = self.bat_df['PlayerId'] == player_id
+                row = self.bat_df.loc[mask].iloc[0]
+                
+                # Only remove if status is 'Keeper'
+                if row['Status'] == 'Keeper':
+                    df = self.bat_df
+                else:
+                    return False  # Not a keeper
+            else:
+                return False  # Player not found
         
         # Reset DataFrame status
         mask = df['PlayerId'] == player_id
@@ -289,7 +320,7 @@ class DraftEngine:
         
         # Find which team has this player and remove from roster
         for team_name, team in self.teams.items():
-            if team.remove_player(player_id):
+            if team.remove_player(player_id, is_pitcher):
                 return True
         
         return False
