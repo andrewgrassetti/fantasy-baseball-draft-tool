@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.express as px
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
+from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
 
 # Page Config (Wide layout is better for dashboards)
 st.set_page_config(page_title="Fantasy Draft Tool", layout="wide")
@@ -17,7 +18,244 @@ if 'engine' not in st.session_state:
 engine = st.session_state.engine
 
 # --- TABS ---
-tab1, tab2, tab3 = st.tabs(["⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters"])
+tab0, tab1, tab2, tab3 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters"])
+
+# ==========================================
+# TAB 0: PRE-DRAFT SETUP
+# ==========================================
+with tab0:
+    st.header("⚙️ Pre-Draft Configuration")
+    
+    # --- TEAM NAMES CONFIGURATION ---
+    st.subheader("1. Configure Team Names")
+    
+    # Get current team names
+    current_teams = list(engine.teams.keys())
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # Number of teams selector
+        num_teams = st.number_input(
+            "Number of Teams",
+            min_value=2,
+            max_value=20,
+            value=len(current_teams),
+            step=1
+        )
+        
+        # Text area for team names (one per line)
+        team_names_text = st.text_area(
+            "Team Names (one per line)",
+            value="\n".join(current_teams),
+            height=200,
+            help="Enter one team name per line. The number of lines should match the number of teams."
+        )
+        
+        if st.button("Update Team Names", type="primary"):
+            # Parse team names from text area
+            new_names = [name.strip() for name in team_names_text.split("\n") if name.strip()]
+            
+            if len(new_names) != num_teams:
+                st.error(f"Please enter exactly {num_teams} team names (one per line)")
+            elif len(new_names) != len(set(new_names)):
+                st.error("Team names must be unique")
+            else:
+                # Update team names
+                engine.set_team_names(new_names)
+                st.success(f"Updated to {len(new_names)} teams")
+                st.rerun()
+    
+    with col2:
+        st.info(f"**Current:** {len(current_teams)} teams")
+    
+    st.divider()
+    
+    # --- KEEPER ASSIGNMENTS ---
+    st.subheader("2. Assign Keepers")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**Add Keeper**")
+        
+        # Team selector
+        keeper_team = st.selectbox("Select Team", list(engine.teams.keys()), key="keeper_team")
+        
+        # Combined player search (same as Draft Room)
+        avail_bat = engine.bat_df[engine.bat_df['Status'] == 'Available']
+        avail_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Available']
+        
+        search_options = {}
+        
+        for _, row in avail_bat.iterrows():
+            label = f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}"
+            search_options[label] = (row['PlayerId'], False)
+        
+        for _, row in avail_pitch.iterrows():
+            label = f"{row['Name']} (P) - {row.get('Team', 'N/A')}"
+            search_options[label] = (row['PlayerId'], True)
+        
+        if search_options:
+            selected_keeper_label = st.selectbox(
+                "Search Player",
+                options=list(search_options.keys()),
+                key="keeper_player"
+            )
+            
+            keeper_cost = st.number_input(
+                "Keeper Cost ($)",
+                min_value=0.0,
+                max_value=1000.0,
+                value=0.0,
+                step=1.0,
+                help="Optional: Set the draft cost for this keeper"
+            )
+            
+            if st.button("Add Keeper", type="primary"):
+                pid, is_pitcher = search_options[selected_keeper_label]
+                if engine.process_keeper(pid, keeper_team, cost=keeper_cost):
+                    st.success(f"Added {selected_keeper_label} to {keeper_team}")
+                    st.rerun()
+                else:
+                    st.error("Failed to add keeper")
+        else:
+            st.info("All players have been assigned. No available players remaining.")
+    
+    with col2:
+        st.markdown("**Current Keepers**")
+        
+        # Get all keepers from all teams
+        all_keepers = []
+        for team_name, team in engine.teams.items():
+            for player in team.roster:
+                # Check if player is a keeper
+                if player.is_pitcher:
+                    mask = engine.pitch_df['PlayerId'] == player.player_id
+                    if not engine.pitch_df.loc[mask].empty:
+                        status = engine.pitch_df.loc[mask, 'Status'].iloc[0]
+                        if status == 'Keeper':
+                            all_keepers.append({
+                                'Team': team_name,
+                                'Player': player.name,
+                                'Position': player.position,
+                                'Cost': player.dollars,
+                                'ID': player.player_id
+                            })
+                else:
+                    mask = engine.bat_df['PlayerId'] == player.player_id
+                    if not engine.bat_df.loc[mask].empty:
+                        status = engine.bat_df.loc[mask, 'Status'].iloc[0]
+                        if status == 'Keeper':
+                            all_keepers.append({
+                                'Team': team_name,
+                                'Player': player.name,
+                                'Position': player.position,
+                                'Cost': player.dollars,
+                                'ID': player.player_id
+                            })
+        
+        if all_keepers:
+            # Group by team
+            for team_name in sorted(set(k['Team'] for k in all_keepers)):
+                team_keepers = [k for k in all_keepers if k['Team'] == team_name]
+                with st.expander(f"**{team_name}** ({len(team_keepers)} keepers)"):
+                    for keeper in team_keepers:
+                        col_a, col_b = st.columns([3, 1])
+                        with col_a:
+                            st.text(f"{keeper['Player']} ({keeper['Position']}) - ${keeper['Cost']:.0f}")
+                        with col_b:
+                            if st.button("Remove", key=f"remove_{keeper['ID']}"):
+                                if engine.remove_keeper(keeper['ID']):
+                                    st.success("Removed")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed")
+        else:
+            st.info("No keepers assigned yet")
+    
+    st.divider()
+    
+    # --- SAVE/LOAD CONFIGURATION ---
+    st.subheader("3. Save/Load Configuration")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("**Save Current Configuration**")
+        
+        config_name = st.text_input(
+            "Configuration Name",
+            value="Keepers 2026",
+            help="Enter a name for this keeper configuration"
+        )
+        
+        if st.button("💾 Save Configuration", type="primary"):
+            if not config_name.strip():
+                st.error("Please enter a configuration name")
+            else:
+                try:
+                    # Export current configuration
+                    config_data = engine.export_keeper_config()
+                    
+                    # Save to file
+                    filepath = save_keeper_config(
+                        name=config_name,
+                        team_names=config_data['team_names'],
+                        keepers=config_data['keepers']
+                    )
+                    
+                    st.success(f"✅ Saved to: {filepath}")
+                except Exception as e:
+                    st.error(f"Failed to save: {str(e)}")
+    
+    with col2:
+        st.markdown("**Load Saved Configuration**")
+        
+        # List saved configurations
+        saved_configs = list_saved_configs()
+        
+        if saved_configs:
+            config_options = {
+                f"{cfg['name']} ({cfg['created_at'][:10]})": cfg['filepath']
+                for cfg in saved_configs
+            }
+            
+            selected_config = st.selectbox(
+                "Select Configuration",
+                options=list(config_options.keys()),
+                key="load_config"
+            )
+            
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                if st.button("📂 Load", type="primary"):
+                    try:
+                        filepath = config_options[selected_config]
+                        config = load_keeper_config(filepath)
+                        
+                        if engine.import_keeper_config(config):
+                            st.success(f"✅ Loaded: {config['name']}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to import configuration")
+                    except Exception as e:
+                        st.error(f"Failed to load: {str(e)}")
+            
+            with col_b:
+                if st.button("🗑️ Delete"):
+                    try:
+                        filepath = config_options[selected_config]
+                        if delete_keeper_config(filepath):
+                            st.success("Deleted")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete")
+                    except Exception as e:
+                        st.error(f"Failed: {str(e)}")
+        else:
+            st.info("No saved configurations found")
 
 # ==========================================
 # TAB 1: DRAFT ROOM (MAIN DASHBOARD)
