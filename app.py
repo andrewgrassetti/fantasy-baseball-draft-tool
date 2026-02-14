@@ -73,7 +73,7 @@ with tab1:
         cols = ['Name', 'POS', 'Team', 'HR', 'SB', 'OBP', 'ADP']
     else:
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'Team', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'ADP']
+        cols = ['Name', 'Team', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'ADP']
         
     st.dataframe(df_show[cols].head(20), hide_index=True)
 
@@ -93,12 +93,12 @@ with tab2:
     # Prepare Data based on selection
     if plot_type == "Batters":
         plot_df = engine.bat_df.copy()
-        numeric_cols = ['ADP', 'HR', 'RBI', 'R', 'SB', 'OBP', 'wOBA', 'WAR','Dollars']
+        numeric_cols = ['ADP', 'HR', 'RBI', 'R', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'Dollars']
         default_x = 'ADP'
         default_y = 'HR'
     else:
         plot_df = engine.pitch_df.copy()
-        numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'IP','Dollars']
+        numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'WAR', 'IP', 'Dollars']
         default_x = 'ADP'
         default_y = 'ERA'
 
