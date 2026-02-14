@@ -370,5 +370,5 @@ class DraftEngine:
             
             return True
             
-        except Exception:
+        except (KeyError, ValueError, TypeError):
             return False

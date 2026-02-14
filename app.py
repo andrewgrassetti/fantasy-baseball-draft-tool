@@ -216,10 +216,13 @@ with tab0:
         saved_configs = list_saved_configs()
         
         if saved_configs:
-            config_options = {
-                f"{cfg['name']} ({cfg['created_at'][:10]})": cfg['filepath']
-                for cfg in saved_configs
-            }
+            config_options = {}
+            for cfg in saved_configs:
+                created_date = cfg['created_at']
+                if created_date != 'Unknown':
+                    created_date = created_date[:10]  # Extract YYYY-MM-DD
+                display_name = f"{cfg['name']} ({created_date})"
+                config_options[display_name] = cfg['filepath']
             
             selected_config = st.selectbox(
                 "Select Configuration",
