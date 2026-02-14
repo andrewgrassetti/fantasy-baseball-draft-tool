@@ -98,7 +98,6 @@ class DraftEngine:
             True if the pick was successfully undone, False otherwise
         """
         # Determine if player is a batter or pitcher and check if they're drafted
-        is_pitcher = None
         df = None
         
         # Check pitchers
@@ -108,7 +107,6 @@ class DraftEngine:
             
             # Only undo if status is 'Drafted' (not 'Keeper')
             if row['Status'] == 'Drafted':
-                is_pitcher = True
                 df = self.pitch_df
             else:
                 return False  # Cannot undo keepers or available players
@@ -120,7 +118,6 @@ class DraftEngine:
             
             # Only undo if status is 'Drafted' (not 'Keeper')
             if row['Status'] == 'Drafted':
-                is_pitcher = False
                 df = self.bat_df
             else:
                 return False  # Cannot undo keepers or available players
@@ -133,13 +130,11 @@ class DraftEngine:
         df.loc[mask, 'DraftedBy'] = None
         
         # Find which team has this player and remove from roster
-        player_removed = False
         for team_name, team in self.teams.items():
             if team.remove_player(player_id):
-                player_removed = True
-                break
+                return True
         
-        return player_removed
+        return False
 
     def get_standings(self):
         """Returns a DataFrame of the current 5x5 standings."""
