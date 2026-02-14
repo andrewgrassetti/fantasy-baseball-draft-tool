@@ -70,10 +70,14 @@ with tab1:
     
     if view_option == "Batters":
         df_show = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'POS', 'Team', 'Dollars', 'HR', 'SB', 'OBP', 'ADP']
+        cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+        # Filter to only columns that exist in the DataFrame
+        cols = [col for col in cols if col in df_show.columns]
     else:
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'Team', 'Dollars', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'ADP']
+        cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'K/9', 'WAR', 'ADP', 'Dollars']
+        # Filter to only columns that exist in the DataFrame
+        cols = [col for col in cols if col in df_show.columns]
     
     # Sort by Dollars (auction value) descending
     df_show = df_show.sort_values(by='Dollars', ascending=False)
