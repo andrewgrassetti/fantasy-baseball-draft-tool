@@ -163,8 +163,9 @@ def load_and_merge_data(data_dir="data"):
     bat_merged = _average_columns(bat_merged, BATTING_AVERAGES, digits=3)
     
     # 6. Add Barrel_prc if Barrel% exists
-    # Note: Barrel% is a decimal (0-1), Barrel_prc is percentage (0-100)
-    # Keeping both for backward compatibility with existing app components
+    # Note: Barrel% from statcast is a decimal (0-1, e.g., 0.268 = 26.8% barrel rate)
+    # Barrel_prc converts to percentage scale (0-100) for easier interpretation
+    # Keeping both for flexibility in downstream visualizations
     if 'Barrel%' in bat_merged.columns:
         bat_merged['Barrel_prc'] = (bat_merged['Barrel%'] * 100).round(3)
     
