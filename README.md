@@ -10,6 +10,7 @@ A modular, Python-based fantasy baseball draft engine featuring a Streamlit dash
     * **Pitching:** K, SV, WAR, ERA, WHIP
 * **Smart Roster Logic:** Validates roster slots (C, 1B, 2B, 3B, SS, 3xOF, 2xUtil, 3xSP, 2xRP, P, 7xBench) and handles multi-position eligibility.
 * **Keeper Management:** Pre-assign keepers to specific teams with value tracking before the draft starts.
+* **Keeper Persistence:** Save and load keeper configurations as JSON files. Configs are stored in a local `saves/` directory and can be loaded back via the dashboard dropdown.
 * **Market Analysis:** Interactive Plotly scatter plots to visualize player value tiers (e.g., Projected HR vs. Auction Dollars).
 * **Data Agnostic:** Built to ingest standard CSV exports from FanGraphs (Steamer, BAT X, ZiPS, etc.).
 
@@ -42,6 +43,8 @@ This tool is designed to work with **FanGraphs CSV exports**.
 3.  Place the CSV files into the `data/` folder.
 4.  **Important:** Open `src/data_loader.py` and ensure the filenames in the `batting_files`, `pitching_files`, and `auction_file` lists match your specific CSV names.
 
+**Note:** The `saves/` directory is **gitignored** and will be created automatically when you save your first keeper configuration. It is not included in repository clones, meaning keeper JSON files are local-only and user-specific.
+
 ## ▶️ Usage
 
 1.  **Launch the Dashboard:**
@@ -53,6 +56,9 @@ This tool is designed to work with **FanGraphs CSV exports**.
 2.  **Pre-Draft Setup:**
     * Navigate to the **"⚙️ Pre-Draft Setup"** tab.
     * Select a team and search for a player to assign them as a Keeper.
+    * Save your keeper configuration with a custom name (e.g., "Keepers 2026") using the 💾 **Save** button.
+    * Load a previously saved configuration from the dropdown (which displays the filename for clarity, e.g., `"Keepers 2026 (Keepers_2026.json)"`).
+    * Delete saved configurations you no longer need using the 🗑️ **Delete** button.
 
 3.  **Draft Room:**
     * Switch to the **"⚾ Draft Room"** tab.
@@ -62,6 +68,10 @@ This tool is designed to work with **FanGraphs CSV exports**.
 4.  **Market Analysis:**
     * Use the **"📊 Market Analysis"** tab to visualize value pockets and identify the best remaining players on the board.
 
+## 📝 Notes
+
+* **Keeper Configurations:** The `saves/` directory is gitignored, meaning keeper configuration files are user-specific and won't be included in a fresh repository clone. If migrating to a new machine, you'll need to manually copy your keeper JSON files from the `saves/` directory or re-create your keeper configurations.
+
 ## 📂 Project Structure
 
 ```text
@@ -70,9 +80,12 @@ fantasy-baseball-draft-tool/
 ├── requirements.txt      # Python dependencies
 ├── README.md             # Documentation
 ├── data/                 # Directory for storing FanGraphs CSVs
+├── saves/                # Auto-created directory for saved keeper configs (gitignored)
 └── src/
     ├── __init__.py
     ├── config.py         # Configuration settings
     ├── data_loader.py    # Logic for loading & merging CSV data
     ├── draft_engine.py   # Core logic (Picks, Keepers, State)
-    └── models.py         # OOP Definitions (Player, Team classes)
+    ├── models.py         # OOP Definitions (Player, Team classes)
+    └── persistence.py    # Save/load keeper configurations (JSON)
+```
