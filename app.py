@@ -615,20 +615,9 @@ Team Alpha,4,hitting""", language="csv")
             run_simulation = st.button("▶️ Run Simulation", type="primary", use_container_width=True)
         
         # Validate keeper team names against draft order CSV team names
-        keeper_team_names = set()
-        for team_name, team in engine.teams.items():
-            for player in team.roster:
-                is_keeper = False
-                if player.is_pitcher:
-                    mask = engine.pitch_df['PlayerId'] == player.player_id
-                    if not engine.pitch_df.loc[mask].empty and engine.pitch_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
-                        is_keeper = True
-                else:
-                    mask = engine.bat_df['PlayerId'] == player.player_id
-                    if not engine.bat_df.loc[mask].empty and engine.bat_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
-                        is_keeper = True
-                if is_keeper:
-                    keeper_team_names.add(team_name)
+        bat_keeper_teams = engine.bat_df.loc[engine.bat_df['Status'] == 'Keeper', 'DraftedBy'].dropna().unique()
+        pitch_keeper_teams = engine.pitch_df.loc[engine.pitch_df['Status'] == 'Keeper', 'DraftedBy'].dropna().unique()
+        keeper_team_names = set(bat_keeper_teams) | set(pitch_keeper_teams)
         
         if keeper_team_names:
             csv_team_set = set(csv_team_names)
