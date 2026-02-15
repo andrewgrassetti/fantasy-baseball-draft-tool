@@ -338,7 +338,7 @@ with tab1:
     with col2:
         st.header("Live Standings (5x5)")
         standings = engine.get_standings()
-        st.dataframe(standings, hide_index=True, use_container_width=True)
+        st.dataframe(standings, hide_index=True, width="stretch")
 
     # Bottom Row: Available Players List
     st.divider()
@@ -428,7 +428,7 @@ with tab2:
     # We can do this by updating traces
     fig.update_traces(marker=dict(size=10, line=dict(width=1, color='DarkSlateGrey')))
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ==========================================
@@ -508,7 +508,7 @@ with tab3:
                         st.dataframe(
                             batters[['Name', 'POS', 'MLB Team', 'Dollars']], 
                             hide_index=True,
-                            use_container_width=True
+                            width="stretch"
                         )
                 
                 with col_right:
@@ -521,7 +521,7 @@ with tab3:
                         st.dataframe(
                             pitchers[['Name', 'POS', 'MLB Team', 'Dollars']], 
                             hide_index=True,
-                            use_container_width=True
+                            width="stretch"
                         )
 
 
@@ -559,7 +559,7 @@ with tab4:
                 
                 # Display preview
                 with st.expander("📋 Preview Draft Order", expanded=False):
-                    st.dataframe(draft_df, hide_index=True, use_container_width=True)
+                    st.dataframe(draft_df, hide_index=True, width="stretch")
                     st.caption(f"Total picks: {len(draft_df)}")
                     
                     # Show team summary
@@ -612,7 +612,7 @@ Team Alpha,4,hitting""", language="csv")
         with col3:
             st.write("")  # Spacing
             st.write("")  # Spacing
-            run_simulation = st.button("▶️ Run Simulation", type="primary", use_container_width=True)
+            run_simulation = st.button("▶️ Run Simulation", type="primary", width="stretch")
         
         # Validate keeper team names against draft order CSV team names
         bat_keeper_teams = engine.bat_df.loc[engine.bat_df['Status'] == 'Keeper', 'DraftedBy'].dropna().unique()
@@ -692,7 +692,7 @@ Team Alpha,4,hitting""", language="csv")
                 with col2:
                     st.write("")
                     st.write("")
-                    if st.button("✅ Confirm Pick", type="primary", use_container_width=True):
+                    if st.button("✅ Confirm Pick", type="primary", width="stretch"):
                         pid, is_pitcher = search_options[selected_player_label]
                         if simulator.make_user_pick(pid, is_pitcher):
                             st.success("Pick confirmed!")
@@ -737,7 +737,7 @@ Team Alpha,4,hitting""", language="csv")
             st.subheader("📊 Current Standings")
             
             standings = simulator.get_standings()
-            st.dataframe(standings, hide_index=True, use_container_width=True)
+            st.dataframe(standings, hide_index=True, width="stretch")
             
             # --- FINAL RESULTS ---
             if simulator.simulation_complete:
@@ -757,7 +757,7 @@ Team Alpha,4,hitting""", language="csv")
                                 st.markdown("**Batters**")
                                 batters = roster_df[roster_df['Type'] == 'Batter']
                                 if not batters.empty:
-                                    st.dataframe(batters[['Name', 'POS', 'Dollars']], hide_index=True, use_container_width=True)
+                                    st.dataframe(batters[['Name', 'POS', 'Dollars']], hide_index=True, width="stretch")
                                 else:
                                     st.caption("None")
                             
@@ -765,7 +765,7 @@ Team Alpha,4,hitting""", language="csv")
                                 st.markdown("**Pitchers**")
                                 pitchers = roster_df[roster_df['Type'] == 'Pitcher']
                                 if not pitchers.empty:
-                                    st.dataframe(pitchers[['Name', 'POS', 'Dollars']], hide_index=True, use_container_width=True)
+                                    st.dataframe(pitchers[['Name', 'POS', 'Dollars']], hide_index=True, width="stretch")
                                 else:
                                     st.caption("None")
                         else:
