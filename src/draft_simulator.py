@@ -286,7 +286,7 @@ class DraftSimulator:
                 )
             ]
             # Only apply filter if it leaves at least one candidate
-            if len(filtered_batters) > 0 or len(filtered_pitchers) > 0:
+            if not filtered_batters.empty or not filtered_pitchers.empty:
                 available_batters = filtered_batters
                 available_pitchers = filtered_pitchers
         
