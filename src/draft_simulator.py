@@ -457,7 +457,7 @@ class DraftSimulator:
         """
         # Use cached standings if provided, otherwise get current standings
         if cached_standings is not None:
-            standings = cached_standings.copy()
+            standings = cached_standings
         else:
             standings = self.engine.get_standings()
         
@@ -471,12 +471,12 @@ class DraftSimulator:
             # For ERA and WHIP, lower values are better, so they get better (lower) ranks
             # For all other stats, higher values are better
             if col in ['ERA', 'WHIP']:
-                standings[f'{col}_rank'] = standings[col].rank(ascending=True, method='min')
+                ranks = standings[col].rank(ascending=True, method='min')
             else:
-                standings[f'{col}_rank'] = standings[col].rank(ascending=False, method='min')
+                ranks = standings[col].rank(ascending=False, method='min')
             
             # Get this team's rank
-            team_rank = standings[standings['Team'] == team_name][f'{col}_rank'].iloc[0]
+            team_rank = ranks[standings['Team'] == team_name].iloc[0]
             num_teams = len(standings)
             # Convert rank to need score: rank 1 (best) = low need, rank n (worst) = high need
             category_rankings[col] = (team_rank / num_teams) * 100
