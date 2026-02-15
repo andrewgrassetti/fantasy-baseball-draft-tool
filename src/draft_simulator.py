@@ -9,6 +9,11 @@ Provides probabilistic draft simulation functionality that:
   2. Positional need (SECONDARY weight - distant second to value)
   3. Category need (LOW weight)
   4. Player tendency (LOW weight)
+
+Positional need also acts as a hard filter: when a team has unfilled
+specific roster slots (C, 1B, 2B, 3B, SS, OF, SP, RP), the candidate
+pool is restricted to players eligible for those positions.  Once only
+generic slots remain (Util, P, BN), all available players are considered.
 """
 
 import pandas as pd
@@ -266,6 +271,25 @@ class DraftSimulator:
         available_batters = available_batters[available_batters['Name'].notna()]
         available_pitchers = available_pitchers[available_pitchers['Name'].notna()]
         
+        # Hard positional filter: when specific roster slots are still open,
+        # restrict candidates to players eligible for those positions.
+        needed_positions = self._get_needed_positions(team_name)
+        if needed_positions:
+            filtered_batters = available_batters[
+                available_batters['POS'].apply(
+                    lambda pos: self._has_needed_position(pos, needed_positions)
+                )
+            ]
+            filtered_pitchers = available_pitchers[
+                available_pitchers['POS'].apply(
+                    lambda pos: self._has_needed_position(pos, needed_positions)
+                )
+            ]
+            # Only apply filter if it leaves at least one candidate
+            if len(filtered_batters) > 0 or len(filtered_pitchers) > 0:
+                available_batters = filtered_batters
+                available_pitchers = filtered_pitchers
+        
         available_batters = available_batters.nlargest(self.TOP_N_PLAYERS, 'Dollars')
         available_pitchers = available_pitchers.nlargest(self.TOP_N_PLAYERS, 'Dollars')
         
@@ -456,6 +480,43 @@ class DraftSimulator:
                 max_need_score = 10.0
         
         return max_need_score
+    
+    def _get_needed_positions(self, team_name: str) -> set:
+        """Get specific position slots that still need filling.
+        
+        Returns only 'specific' positions (C, 1B, 2B, 3B, SS, OF for batters;
+        SP, RP for pitchers).  Generic/flex slots (Util, P, BN, IL, NA) are
+        excluded so that the AI is not restricted when only flex slots remain.
+        
+        Args:
+            team_name: Name of the team
+            
+        Returns:
+            Set of position strings that have unfilled specific slots
+        """
+        team = self.engine.teams[team_name]
+        needed = set()
+        specific_positions = ['C', '1B', '2B', '3B', 'SS', 'OF', 'SP', 'RP']
+        for pos in specific_positions:
+            if pos in team.SLOT_LIMITS:
+                if team.slots_filled.get(pos, 0) < team.SLOT_LIMITS[pos]:
+                    needed.add(pos)
+        return needed
+    
+    def _has_needed_position(self, position_str, needed_positions: set) -> bool:
+        """Check if a position string contains any needed position.
+        
+        Args:
+            position_str: Player position string (e.g. '2B', 'SS/2B', 'SP')
+            needed_positions: Set of positions that need filling
+            
+        Returns:
+            True if the player is eligible for at least one needed position
+        """
+        if pd.isna(position_str) or str(position_str) == 'nan':
+            return False
+        positions = [p.strip() for p in str(position_str).split('/')]
+        return any(p in needed_positions for p in positions)
     
     def _compute_category_rankings(self, standings: pd.DataFrame, team_name: str) -> Dict:
         """Pre-compute category rankings for a team from standings.
