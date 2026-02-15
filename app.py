@@ -3,6 +3,7 @@ import plotly.express as px
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
 from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
+from src.draft_simulator import DraftSimulator
 
 # Page Config (Wide layout is better for dashboards)
 st.set_page_config(page_title="Fantasy Draft Tool", layout="wide")
@@ -18,7 +19,7 @@ if 'engine' not in st.session_state:
 engine = st.session_state.engine
 
 # --- TABS ---
-tab0, tab1, tab2, tab3 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters"])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters", "🎲 Draft Simulator"])
 
 # ==========================================
 # TAB 0: PRE-DRAFT SETUP
@@ -522,3 +523,245 @@ with tab3:
                             hide_index=True,
                             use_container_width=True
                         )
+
+
+# ==========================================
+# TAB 4: DRAFT SIMULATOR
+# ==========================================
+with tab4:
+    st.header("🎲 Draft Simulator")
+    st.markdown("Simulate a fantasy draft with probabilistic AI picks. Upload a draft order CSV and watch the simulation unfold!")
+    
+    # --- SETUP SECTION ---
+    st.subheader("⚙️ Setup")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # CSV Upload
+        uploaded_file = st.file_uploader(
+            "Upload Draft Order CSV",
+            type=['csv'],
+            help="CSV must have 3 columns: player_name, pick_number, tendency"
+        )
+        
+        if uploaded_file is not None:
+            # Read CSV content
+            csv_content = uploaded_file.getvalue().decode('utf-8')
+            
+            try:
+                # Parse and validate CSV
+                from io import StringIO
+                import pandas as pd
+                draft_df = pd.read_csv(StringIO(csv_content))
+                
+                st.success("✅ CSV uploaded successfully!")
+                
+                # Display preview
+                with st.expander("📋 Preview Draft Order", expanded=False):
+                    st.dataframe(draft_df, hide_index=True, use_container_width=True)
+                    st.caption(f"Total picks: {len(draft_df)}")
+                    
+                    # Show team summary
+                    team_counts = draft_df['player_name'].value_counts()
+                    st.caption(f"Teams: {', '.join([f'{team} ({count})' for team, count in team_counts.items()])}")
+                
+                # Store CSV content in session state
+                st.session_state.draft_csv = csv_content
+                
+            except Exception as e:
+                st.error(f"❌ Error parsing CSV: {str(e)}")
+                st.session_state.draft_csv = None
+    
+    with col2:
+        st.markdown("**CSV Format Example:**")
+        st.code("""player_name,pick_number,tendency
+Team Alpha,1,hitting
+Team Beta,2,pitching
+Team Gamma,3,hitting
+Team Alpha,4,hitting""", language="csv")
+    
+    st.divider()
+    
+    # Only show rest of UI if CSV is uploaded
+    if 'draft_csv' in st.session_state and st.session_state.draft_csv:
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
+        with col1:
+            # Get unique team names from CSV
+            from io import StringIO
+            import pandas as pd
+            draft_df = pd.read_csv(StringIO(st.session_state.draft_csv))
+            team_names = sorted(draft_df['player_name'].unique())
+            
+            user_team = st.selectbox(
+                "Your Team Name",
+                options=team_names,
+                help="Select your team from the draft order"
+            )
+        
+        with col2:
+            random_seed = st.number_input(
+                "Random Seed (optional)",
+                min_value=0,
+                max_value=999999,
+                value=42,
+                help="Set a seed for reproducible simulation results"
+            )
+        
+        with col3:
+            st.write("")  # Spacing
+            st.write("")  # Spacing
+            run_simulation = st.button("▶️ Run Simulation", type="primary", use_container_width=True)
+        
+        # Initialize or reset simulator
+        if run_simulation:
+            try:
+                simulator = DraftSimulator(
+                    engine=engine,
+                    draft_order_csv=st.session_state.draft_csv,
+                    user_team_name=user_team,
+                    random_seed=random_seed if random_seed > 0 else None
+                )
+                st.session_state.simulator = simulator
+                st.session_state.simulation_started = True
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error starting simulation: {str(e)}")
+        
+        # --- SIMULATION SECTION ---
+        if 'simulation_started' in st.session_state and st.session_state.simulation_started:
+            simulator = st.session_state.simulator
+            
+            st.divider()
+            st.subheader("🎯 Simulation Progress")
+            
+            # Run simulation until user's turn or completion
+            if not simulator.simulation_complete and not simulator.is_paused:
+                new_picks = simulator.simulate_until_user_or_complete()
+            
+            # Show current pick status
+            if simulator.simulation_complete:
+                st.success("🎉 Simulation Complete!")
+            elif simulator.is_user_turn():
+                st.info("🎯 **YOUR PICK!** Select a player below.")
+            else:
+                st.info(f"Pick {simulator.current_pick_index + 1} / {len(simulator.draft_order)}")
+            
+            # --- USER PICK INTERFACE ---
+            if simulator.is_user_turn() and not simulator.simulation_complete:
+                st.markdown("---")
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    # Get available players
+                    avail_bat = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available']
+                    avail_pitch = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available']
+                    
+                    search_options = {}
+                    
+                    for _, row in avail_bat.iterrows():
+                        label = f"{row['Name']} ({row['POS']}) - ${row.get('Dollars', 0):.0f}"
+                        search_options[label] = (row['PlayerId'], False)
+                    
+                    for _, row in avail_pitch.iterrows():
+                        label = f"{row['Name']} (P) - ${row.get('Dollars', 0):.0f}"
+                        search_options[label] = (row['PlayerId'], True)
+                    
+                    selected_player_label = st.selectbox(
+                        "Select Your Player",
+                        options=list(search_options.keys()),
+                        key="sim_player_select"
+                    )
+                
+                with col2:
+                    st.write("")
+                    st.write("")
+                    if st.button("✅ Confirm Pick", type="primary", use_container_width=True):
+                        pid, is_pitcher = search_options[selected_player_label]
+                        if simulator.make_user_pick(pid, is_pitcher):
+                            st.success("Pick confirmed!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to process pick")
+            
+            # --- PICK LOG ---
+            st.divider()
+            st.subheader("📜 Pick Log")
+            
+            if simulator.pick_log:
+                # Display recent picks (last 10)
+                recent_picks = simulator.pick_log[-10:]
+                
+                for pick in reversed(recent_picks):
+                    col1, col2, col3, col4 = st.columns([1, 2, 3, 4])
+                    
+                    with col1:
+                        st.text(f"#{pick['pick_number']}")
+                    
+                    with col2:
+                        st.text(pick['team_name'])
+                    
+                    with col3:
+                        player_type = "⚾" if not pick['is_pitcher'] else "🥎"
+                        st.text(f"{player_type} {pick['player_name']} ({pick['position']})")
+                    
+                    with col4:
+                        st.caption(pick['rationale'])
+                
+                # Show all picks in expander
+                if len(simulator.pick_log) > 10:
+                    with st.expander(f"📋 View All {len(simulator.pick_log)} Picks"):
+                        for pick in reversed(simulator.pick_log):
+                            st.text(f"#{pick['pick_number']}: {pick['team_name']} - {pick['player_name']} ({pick['position']}) - {pick['rationale']}")
+            else:
+                st.info("No picks yet. Click 'Run Simulation' to start.")
+            
+            # --- STANDINGS ---
+            st.divider()
+            st.subheader("📊 Current Standings")
+            
+            standings = simulator.get_standings()
+            st.dataframe(standings, hide_index=True, use_container_width=True)
+            
+            # --- FINAL RESULTS ---
+            if simulator.simulation_complete:
+                st.divider()
+                st.subheader("🏆 Final Rosters")
+                
+                team_names = sorted(simulator.engine.teams.keys())
+                
+                for team_name in team_names:
+                    roster_df = simulator.get_team_roster(team_name)
+                    
+                    with st.expander(f"**{team_name}** — {len(roster_df)} players"):
+                        if not roster_df.empty:
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("**Batters**")
+                                batters = roster_df[roster_df['Type'] == 'Batter']
+                                if not batters.empty:
+                                    st.dataframe(batters[['Name', 'POS', 'Dollars']], hide_index=True, use_container_width=True)
+                                else:
+                                    st.caption("None")
+                            
+                            with col2:
+                                st.markdown("**Pitchers**")
+                                pitchers = roster_df[roster_df['Type'] == 'Pitcher']
+                                if not pitchers.empty:
+                                    st.dataframe(pitchers[['Name', 'POS', 'Dollars']], hide_index=True, use_container_width=True)
+                                else:
+                                    st.caption("None")
+                        else:
+                            st.info("No players drafted")
+                
+                # Reset button
+                if st.button("🔄 Reset Simulator"):
+                    if 'simulator' in st.session_state:
+                        del st.session_state.simulator
+                    if 'simulation_started' in st.session_state:
+                        del st.session_state.simulation_started
+                    st.rerun()
+    else:
+        st.info("👆 Upload a draft order CSV to begin")
