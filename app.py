@@ -621,7 +621,7 @@ Team Alpha,4,hitting""", language="csv")
                     engine=engine,
                     draft_order_csv=st.session_state.draft_csv,
                     user_team_name=user_team,
-                    random_seed=random_seed if random_seed > 0 else None
+                    random_seed=random_seed
                 )
                 st.session_state.simulator = simulator
                 st.session_state.simulation_started = True

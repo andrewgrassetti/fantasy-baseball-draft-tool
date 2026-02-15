@@ -128,7 +128,7 @@ class DraftSimulator:
         
         # Validate pick numbers
         if not df['pick_number'].is_monotonic_increasing:
-            raise ValueError("Pick numbers must be sequential")
+            raise ValueError("Pick numbers must be in increasing order")
         
         if df['pick_number'].iloc[0] != 1:
             raise ValueError("Pick numbers must start at 1")
@@ -443,17 +443,17 @@ class DraftSimulator:
             if col == 'Team':
                 continue
             
-            # For ERA and WHIP, lower is better
+            # For ERA and WHIP, lower values are better, so they get better (lower) ranks
+            # For all other stats, higher values are better
             if col in ['ERA', 'WHIP']:
                 standings[f'{col}_rank'] = standings[col].rank(ascending=True, method='min')
             else:
-                # For all other stats, higher is better
                 standings[f'{col}_rank'] = standings[col].rank(ascending=False, method='min')
             
             # Get this team's rank
             team_rank = standings[standings['Team'] == team_name][f'{col}_rank'].iloc[0]
             num_teams = len(standings)
-            # Convert to need score (1 = no need, num_teams = high need)
+            # Convert rank to need score: rank 1 (best) = low need, rank n (worst) = high need
             category_rankings[col] = (team_rank / num_teams) * 100
         
         # Calculate how much this player helps with weak categories
