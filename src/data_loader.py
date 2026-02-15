@@ -207,12 +207,12 @@ def load_and_merge_data(data_dir="data"):
             df = _safe_read_csv(path)
             if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                name_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
+                team_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
                 if 'Team' not in bat_merged.columns:
-                    bat_merged['Team'] = bat_merged['PlayerId'].map(name_map)
+                    bat_merged['Team'] = bat_merged['PlayerId'].map(team_map)
                 else:
                     mask = bat_merged['Team'].isna()
-                    bat_merged.loc[mask, 'Team'] = bat_merged.loc[mask, 'PlayerId'].map(name_map)
+                    bat_merged.loc[mask, 'Team'] = bat_merged.loc[mask, 'PlayerId'].map(team_map)
     
     # Add Name column if missing or fill NaN values
     if 'Name' not in bat_merged.columns or bat_merged.get('Name', pd.Series()).isna().any():
@@ -298,12 +298,12 @@ def load_and_merge_data(data_dir="data"):
             df = _safe_read_csv(path)
             if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                name_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
+                team_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
                 if 'Team' not in pitch_merged.columns:
-                    pitch_merged['Team'] = pitch_merged['PlayerId'].map(name_map)
+                    pitch_merged['Team'] = pitch_merged['PlayerId'].map(team_map)
                 else:
                     mask = pitch_merged['Team'].isna()
-                    pitch_merged.loc[mask, 'Team'] = pitch_merged.loc[mask, 'PlayerId'].map(name_map)
+                    pitch_merged.loc[mask, 'Team'] = pitch_merged.loc[mask, 'PlayerId'].map(team_map)
     
     # Add Name column if missing or fill NaN values
     if 'Name' not in pitch_merged.columns or pitch_merged.get('Name', pd.Series()).isna().any():
