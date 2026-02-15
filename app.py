@@ -592,11 +592,11 @@ Team Alpha,4,hitting""", language="csv")
             from io import StringIO
             import pandas as pd
             draft_df = pd.read_csv(StringIO(st.session_state.draft_csv))
-            team_names = sorted(draft_df['player_name'].unique())
+            csv_team_names = sorted(draft_df['player_name'].unique())
             
             user_team = st.selectbox(
                 "Your Team Name",
-                options=team_names,
+                options=csv_team_names,
                 help="Select your team from the draft order"
             )
         
@@ -613,6 +613,32 @@ Team Alpha,4,hitting""", language="csv")
             st.write("")  # Spacing
             st.write("")  # Spacing
             run_simulation = st.button("▶️ Run Simulation", type="primary", use_container_width=True)
+        
+        # Validate keeper team names against draft order CSV team names
+        keeper_team_names = set()
+        for team_name, team in engine.teams.items():
+            for player in team.roster:
+                is_keeper = False
+                if player.is_pitcher:
+                    mask = engine.pitch_df['PlayerId'] == player.player_id
+                    if not engine.pitch_df.loc[mask].empty and engine.pitch_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
+                        is_keeper = True
+                else:
+                    mask = engine.bat_df['PlayerId'] == player.player_id
+                    if not engine.bat_df.loc[mask].empty and engine.bat_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
+                        is_keeper = True
+                if is_keeper:
+                    keeper_team_names.add(team_name)
+        
+        if keeper_team_names:
+            csv_team_set = set(csv_team_names)
+            mismatched_teams = keeper_team_names - csv_team_set
+            if mismatched_teams:
+                st.warning(
+                    f"⚠️ Keeper team names not found in draft order CSV: **{', '.join(sorted(mismatched_teams))}**. "
+                    f"Draft order CSV teams: {', '.join(sorted(csv_team_set))}. "
+                    f"Please update team names in Pre-Draft Setup or draft order CSV to match."
+                )
         
         # Initialize or reset simulator
         if run_simulation:
