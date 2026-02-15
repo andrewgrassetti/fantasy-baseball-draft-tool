@@ -32,7 +32,7 @@ class DraftSimulator:
     EPSILON = 0.01
     
     # Maximum number of top players (by Dollar value) to consider per pick
-    TOP_N_PLAYERS = 200
+    TOP_N_PLAYERS = 500
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
         """Initialize the draft simulator.
