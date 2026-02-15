@@ -5,10 +5,10 @@ Provides probabilistic draft simulation functionality that:
 - Accepts CSV-based draft order with team tendencies
 - Pauses for user picks
 - Auto-picks for AI teams using weighted random selection based on:
-  1. Positional need (HIGH weight - equal to weakest category)
-  2. Weakest category improvement (HIGH weight - equal to positional need)
-  3. Player tendency (MEDIUM weight)
-  4. Market value baseline (Dollars)
+  1. Dollar value ranking (DOMINANT weight)
+  2. Positional need (SECONDARY weight - distant second to value)
+  3. Category need (LOW weight)
+  4. Player tendency (LOW weight)
 """
 
 import pandas as pd
@@ -23,10 +23,10 @@ class DraftSimulator:
     """Simulates a fantasy baseball draft with probabilistic AI picks."""
     
     # Scoring weights for pick selection
-    WEIGHT_POSITIONAL_NEED = 1.0      # HIGH weight
-    WEIGHT_CATEGORY_NEED = 1.0        # HIGH weight (equal to positional)
-    WEIGHT_TENDENCY = 0.5             # MEDIUM weight
-    WEIGHT_MARKET_VALUE = 0.3         # BASELINE weight
+    WEIGHT_MARKET_VALUE = 5.0          # DOMINANT weight - dollar value is king
+    WEIGHT_POSITIONAL_NEED = 0.5       # SECONDARY weight - distant second
+    WEIGHT_CATEGORY_NEED = 0.1         # LOW weight
+    WEIGHT_TENDENCY = 0.1              # LOW weight
     
     # Small epsilon to ensure every player has nonzero selection probability
     EPSILON = 0.01
