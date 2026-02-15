@@ -592,11 +592,11 @@ Team Alpha,4,hitting""", language="csv")
             from io import StringIO
             import pandas as pd
             draft_df = pd.read_csv(StringIO(st.session_state.draft_csv))
-            team_names = sorted(draft_df['player_name'].unique())
+            csv_team_names = sorted(draft_df['player_name'].unique())
             
             user_team = st.selectbox(
                 "Your Team Name",
-                options=team_names,
+                options=csv_team_names,
                 help="Select your team from the draft order"
             )
         
@@ -613,6 +613,21 @@ Team Alpha,4,hitting""", language="csv")
             st.write("")  # Spacing
             st.write("")  # Spacing
             run_simulation = st.button("▶️ Run Simulation", type="primary", use_container_width=True)
+        
+        # Validate keeper team names against draft order CSV team names
+        bat_keeper_teams = engine.bat_df.loc[engine.bat_df['Status'] == 'Keeper', 'DraftedBy'].dropna().unique()
+        pitch_keeper_teams = engine.pitch_df.loc[engine.pitch_df['Status'] == 'Keeper', 'DraftedBy'].dropna().unique()
+        keeper_team_names = set(bat_keeper_teams) | set(pitch_keeper_teams)
+        
+        if keeper_team_names:
+            csv_team_set = set(csv_team_names)
+            mismatched_teams = keeper_team_names - csv_team_set
+            if mismatched_teams:
+                st.warning(
+                    f"⚠️ Keeper team names not found in draft order CSV: **{', '.join(sorted(mismatched_teams))}**. "
+                    f"Draft order CSV teams: {', '.join(sorted(csv_team_set))}. "
+                    f"Please update team names in Pre-Draft Setup or draft order CSV to match."
+                )
         
         # Initialize or reset simulator
         if run_simulation:

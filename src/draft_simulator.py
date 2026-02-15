@@ -75,9 +75,24 @@ class DraftSimulator:
         bat_df_copy = engine.bat_df.copy()
         pitch_df_copy = engine.pitch_df.copy()
         
+        # Save keeper status before DraftEngine.__init__ resets all to 'Available'
+        bat_status = bat_df_copy['Status'].copy()
+        bat_drafted_by = bat_df_copy['DraftedBy'].copy()
+        pitch_status = pitch_df_copy['Status'].copy()
+        pitch_drafted_by = pitch_df_copy['DraftedBy'].copy()
+        
         # Create new engine with copied data
         team_names = list(engine.teams.keys())
         new_engine = DraftEngine(bat_df_copy, pitch_df_copy, team_names=team_names)
+        
+        # Restore keeper status in DataFrames
+        bat_keeper_mask = bat_status == 'Keeper'
+        new_engine.bat_df.loc[bat_keeper_mask, 'Status'] = 'Keeper'
+        new_engine.bat_df.loc[bat_keeper_mask, 'DraftedBy'] = bat_drafted_by[bat_keeper_mask]
+        
+        pitch_keeper_mask = pitch_status == 'Keeper'
+        new_engine.pitch_df.loc[pitch_keeper_mask, 'Status'] = 'Keeper'
+        new_engine.pitch_df.loc[pitch_keeper_mask, 'DraftedBy'] = pitch_drafted_by[pitch_keeper_mask]
         
         # Copy team rosters (keepers)
         for team_name, team in engine.teams.items():
