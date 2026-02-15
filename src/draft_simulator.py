@@ -262,6 +262,10 @@ class DraftSimulator:
         available_batters = self.engine.bat_df[self.engine.bat_df['Status'] == 'Available']
         available_pitchers = self.engine.pitch_df[self.engine.pitch_df['Status'] == 'Available']
         
+        # Filter out players with missing names to avoid NaN picks
+        available_batters = available_batters[available_batters['Name'].notna()]
+        available_pitchers = available_pitchers[available_pitchers['Name'].notna()]
+        
         available_batters = available_batters.nlargest(self.TOP_N_PLAYERS, 'Dollars')
         available_pitchers = available_pitchers.nlargest(self.TOP_N_PLAYERS, 'Dollars')
         

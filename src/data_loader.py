@@ -115,8 +115,8 @@ def load_and_merge_data(data_dir="data"):
         "2026_zips_pitch.csv", "2026_oopsy_pitch.csv"
     ]
     
-    auction_bat_file = "2026_batx_auction_bat.csv"
-    auction_pitch_file = "2026_oopsy_auction_pitch.csv"
+    auction_bat_files = ["2026_batx_auction_bat.csv", "2026_oopsy_auction_bat.csv"]
+    auction_pitch_files = ["2026_oopsy_auction_pitch.csv", "2026_batx_auction_pitch.csv"]
     
     # Extract year from projection files and use previous year for statcast
     # Statcast data is always from the prior season
@@ -132,12 +132,16 @@ def load_and_merge_data(data_dir="data"):
     
     # --- PROCESS BATTERS ---
     
-    # 1. Load and filter auction (base of merge chain)
-    bat_auc_path = os.path.join(data_dir, auction_bat_file)
-    bat_auc = _safe_read_csv(bat_auc_path)
-    if bat_auc is not None:
-        bat_auc = _standardize_columns(bat_auc)
-        bat_auc = _filter_columns(bat_auc, COLUMNS_TO_KEEP['auction'])
+    # 1. Load and filter auction sources (base of merge chain)
+    bat_auctions = []
+    for f in auction_bat_files:
+        path = os.path.join(data_dir, f)
+        df = _safe_read_csv(path)
+        if df is not None:
+            df = _standardize_columns(df)
+            df = _filter_columns(df, COLUMNS_TO_KEEP['auction'])
+            if df is not None:
+                bat_auctions.append(df)
     
     # 2. Load and filter projection sources
     bat_projections = []
@@ -157,10 +161,9 @@ def load_and_merge_data(data_dir="data"):
         statcast_bat = _standardize_columns(statcast_bat)
         statcast_bat = _filter_columns(statcast_bat, COLUMNS_TO_KEEP['statcast'])
     
-    # 4. Wide merge: auction + projections + statcast
+    # 4. Wide merge: auctions + projections + statcast
     merge_list = []
-    if bat_auc is not None:
-        merge_list.append(bat_auc)
+    merge_list.extend(bat_auctions)
     merge_list.extend(bat_projections)
     if statcast_bat is not None:
         merge_list.append(statcast_bat)
@@ -195,28 +198,37 @@ def load_and_merge_data(data_dir="data"):
     else:
         bat_merged['POS'] = bat_merged['POS'].fillna('Unknown')
     
-    # Add Team column if missing (extract from first available metadata)
-    if 'Team' not in bat_merged.columns:
-        # Try to get Team from any projection file
-        for f in batting_files:
+    # Add Team column if missing or fill NaN values
+    if 'Team' not in bat_merged.columns or bat_merged.get('Team', pd.Series()).isna().any():
+        for f in auction_bat_files + batting_files:
+            if 'Team' in bat_merged.columns and not bat_merged['Team'].isna().any():
+                break
             path = os.path.join(data_dir, f)
             df = _safe_read_csv(path)
             if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                team_map = df[['PlayerId', 'Team']].drop_duplicates('PlayerId')
-                bat_merged = pd.merge(bat_merged, team_map, on='PlayerId', how='left')
-                break
+                team_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
+                if 'Team' not in bat_merged.columns:
+                    bat_merged['Team'] = bat_merged['PlayerId'].map(team_map)
+                else:
+                    mask = bat_merged['Team'].isna()
+                    bat_merged.loc[mask, 'Team'] = bat_merged.loc[mask, 'PlayerId'].map(team_map)
     
-    # Add Name column if missing
-    if 'Name' not in bat_merged.columns:
-        for f in [auction_bat_file] + batting_files:
+    # Add Name column if missing or fill NaN values
+    if 'Name' not in bat_merged.columns or bat_merged.get('Name', pd.Series()).isna().any():
+        for f in auction_bat_files + batting_files:
+            if 'Name' in bat_merged.columns and not bat_merged['Name'].isna().any():
+                break
             path = os.path.join(data_dir, f)
             df = _safe_read_csv(path)
             if df is not None and 'Name' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                name_map = df[['PlayerId', 'Name']].drop_duplicates('PlayerId')
-                bat_merged = pd.merge(bat_merged, name_map, on='PlayerId', how='left')
-                break
+                name_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Name']
+                if 'Name' not in bat_merged.columns:
+                    bat_merged['Name'] = bat_merged['PlayerId'].map(name_map)
+                else:
+                    mask = bat_merged['Name'].isna()
+                    bat_merged.loc[mask, 'Name'] = bat_merged.loc[mask, 'PlayerId'].map(name_map)
     
     # Select final columns (only those that exist)
     bat_final_cols = ['Name', 'POS', 'PlayerId', 'Team', 'Type', 
@@ -227,12 +239,16 @@ def load_and_merge_data(data_dir="data"):
     
     # --- PROCESS PITCHERS ---
     
-    # 1. Load and filter auction (base of merge chain)
-    pitch_auc_path = os.path.join(data_dir, auction_pitch_file)
-    pitch_auc = _safe_read_csv(pitch_auc_path)
-    if pitch_auc is not None:
-        pitch_auc = _standardize_columns(pitch_auc)
-        pitch_auc = _filter_columns(pitch_auc, COLUMNS_TO_KEEP['auction'])
+    # 1. Load and filter auction sources (base of merge chain)
+    pitch_auctions = []
+    for f in auction_pitch_files:
+        path = os.path.join(data_dir, f)
+        df = _safe_read_csv(path)
+        if df is not None:
+            df = _standardize_columns(df)
+            df = _filter_columns(df, COLUMNS_TO_KEEP['auction'])
+            if df is not None:
+                pitch_auctions.append(df)
     
     # 2. Load and filter projection sources
     pitch_projections = []
@@ -245,10 +261,9 @@ def load_and_merge_data(data_dir="data"):
             if df is not None:
                 pitch_projections.append(df)
     
-    # 3. Wide merge: auction + projections
+    # 3. Wide merge: auctions + projections
     merge_list = []
-    if pitch_auc is not None:
-        merge_list.append(pitch_auc)
+    merge_list.extend(pitch_auctions)
     merge_list.extend(pitch_projections)
     
     if not merge_list:
@@ -274,27 +289,37 @@ def load_and_merge_data(data_dir="data"):
     else:
         pitch_merged['POS'] = pitch_merged['POS'].fillna('P')
     
-    # Add Team column if missing
-    if 'Team' not in pitch_merged.columns:
-        for f in pitching_files:
+    # Add Team column if missing or fill NaN values
+    if 'Team' not in pitch_merged.columns or pitch_merged.get('Team', pd.Series()).isna().any():
+        for f in auction_pitch_files + pitching_files:
+            if 'Team' in pitch_merged.columns and not pitch_merged['Team'].isna().any():
+                break
             path = os.path.join(data_dir, f)
             df = _safe_read_csv(path)
             if df is not None and 'Team' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                team_map = df[['PlayerId', 'Team']].drop_duplicates('PlayerId')
-                pitch_merged = pd.merge(pitch_merged, team_map, on='PlayerId', how='left')
-                break
+                team_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Team']
+                if 'Team' not in pitch_merged.columns:
+                    pitch_merged['Team'] = pitch_merged['PlayerId'].map(team_map)
+                else:
+                    mask = pitch_merged['Team'].isna()
+                    pitch_merged.loc[mask, 'Team'] = pitch_merged.loc[mask, 'PlayerId'].map(team_map)
     
-    # Add Name column if missing
-    if 'Name' not in pitch_merged.columns:
-        for f in [auction_pitch_file] + pitching_files:
+    # Add Name column if missing or fill NaN values
+    if 'Name' not in pitch_merged.columns or pitch_merged.get('Name', pd.Series()).isna().any():
+        for f in auction_pitch_files + pitching_files:
+            if 'Name' in pitch_merged.columns and not pitch_merged['Name'].isna().any():
+                break
             path = os.path.join(data_dir, f)
             df = _safe_read_csv(path)
             if df is not None and 'Name' in df.columns and 'PlayerId' in df.columns:
                 df = _standardize_columns(df)
-                name_map = df[['PlayerId', 'Name']].drop_duplicates('PlayerId')
-                pitch_merged = pd.merge(pitch_merged, name_map, on='PlayerId', how='left')
-                break
+                name_map = df.drop_duplicates('PlayerId').set_index('PlayerId')['Name']
+                if 'Name' not in pitch_merged.columns:
+                    pitch_merged['Name'] = pitch_merged['PlayerId'].map(name_map)
+                else:
+                    mask = pitch_merged['Name'].isna()
+                    pitch_merged.loc[mask, 'Name'] = pitch_merged.loc[mask, 'PlayerId'].map(name_map)
     
     # Reverse engineering for ERA/WHIP
     if 'ERA' in pitch_merged.columns and 'IP' in pitch_merged.columns:

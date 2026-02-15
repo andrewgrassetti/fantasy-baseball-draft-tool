@@ -739,6 +739,84 @@ Team Alpha,4,hitting""", language="csv")
             standings = simulator.get_standings()
             st.dataframe(standings, hide_index=True, width="stretch")
             
+            # --- AVAILABLE PLAYER RANKS ---
+            st.divider()
+            st.subheader("Top Available Players")
+            
+            sim_view_option = st.radio("View", ["Batters", "Pitchers"], horizontal=True, key="sim_view_option")
+            
+            if sim_view_option == "Batters":
+                sim_df_show = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available'].copy()
+                sim_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+            else:
+                sim_df_show = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
+                sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'K/9', 'WAR', 'ADP', 'Dollars']
+                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+            
+            sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
+            
+            sim_players_per_page = 50
+            sim_total_players = len(sim_df_show)
+            sim_total_pages = (sim_total_players + sim_players_per_page - 1) // sim_players_per_page
+            
+            if sim_total_pages > 0:
+                sim_page = st.number_input("Page", min_value=1, max_value=sim_total_pages, value=1, step=1, key="sim_page")
+                sim_start_idx = (sim_page - 1) * sim_players_per_page
+                sim_end_idx = min(sim_start_idx + sim_players_per_page, sim_total_players)
+                
+                st.caption(f"Showing {sim_start_idx + 1}–{sim_end_idx} of {sim_total_players} players")
+                st.dataframe(sim_df_show[sim_cols].iloc[sim_start_idx:sim_end_idx], hide_index=True)
+            else:
+                st.info("No available players found.")
+            
+            # --- PLAYER VALUE VISUALIZATION ---
+            st.divider()
+            st.subheader("Player Value Visualization")
+            
+            col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
+            
+            with col_ctrl1:
+                sim_plot_type = st.radio("Player Type", ["Batters", "Pitchers"], horizontal=True, key="sim_plot_type")
+            
+            if sim_plot_type == "Batters":
+                sim_plot_df = simulator.engine.bat_df.copy()
+                sim_numeric_cols = ['ADP', 'HR', 'RBI', 'R', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'Dollars']
+                sim_default_x = 'ADP'
+                sim_default_y = 'HR'
+            else:
+                sim_plot_df = simulator.engine.pitch_df.copy()
+                sim_numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'WAR', 'IP', 'Dollars']
+                sim_default_x = 'ADP'
+                sim_default_y = 'ERA'
+            
+            sim_numeric_cols = [col for col in sim_numeric_cols if col in sim_plot_df.columns]
+            
+            with col_ctrl2:
+                sim_x_axis = st.selectbox("X Axis", sim_numeric_cols, index=sim_numeric_cols.index(sim_default_x) if sim_default_x in sim_numeric_cols else 0, key="sim_x_axis")
+            
+            with col_ctrl3:
+                sim_y_axis = st.selectbox("Y Axis", sim_numeric_cols, index=sim_numeric_cols.index(sim_default_y) if sim_default_y in sim_numeric_cols else 0, key="sim_y_axis")
+            
+            sim_color_map = {'Available': '#1f77b4', 'Drafted': '#d62728', 'Keeper': '#2ca02c'}
+            
+            sim_fig = px.scatter(
+                sim_plot_df,
+                x=sim_x_axis,
+                y=sim_y_axis,
+                color='Status',
+                color_discrete_map=sim_color_map,
+                hover_name='Name',
+                hover_data=['Team', 'POS', 'Status'],
+                title=f"{sim_y_axis} vs {sim_x_axis} ({sim_plot_type})",
+                template="plotly_white",
+                height=600
+            )
+            
+            sim_fig.update_traces(marker=dict(size=10, line=dict(width=1, color='DarkSlateGrey')))
+            
+            st.plotly_chart(sim_fig, use_container_width=True)
+            
             # --- FINAL RESULTS ---
             if simulator.simulation_complete:
                 st.divider()
