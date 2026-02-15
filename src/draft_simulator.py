@@ -259,6 +259,9 @@ class DraftSimulator:
         available_batters = self.engine.bat_df[self.engine.bat_df['Status'] == 'Available']
         available_pitchers = self.engine.pitch_df[self.engine.pitch_df['Status'] == 'Available']
         
+        # Cache standings once before scoring loop to avoid repeated recalculation
+        cached_standings = self.engine.get_standings()
+        
         # Calculate scores for all available players
         player_scores = []
         
@@ -267,7 +270,8 @@ class DraftSimulator:
                 row, 
                 team_name, 
                 tendency, 
-                is_pitcher=False
+                is_pitcher=False,
+                cached_standings=cached_standings
             )
             player_scores.append({
                 'player_id': row['PlayerId'],
@@ -283,7 +287,8 @@ class DraftSimulator:
                 row, 
                 team_name, 
                 tendency, 
-                is_pitcher=True
+                is_pitcher=True,
+                cached_standings=cached_standings
             )
             player_scores.append({
                 'player_id': row['PlayerId'],
@@ -335,7 +340,7 @@ class DraftSimulator:
         
         return pick_log_entry
     
-    def _calculate_player_score(self, player_row: pd.Series, team_name: str, tendency: str, is_pitcher: bool) -> float:
+    def _calculate_player_score(self, player_row: pd.Series, team_name: str, tendency: str, is_pitcher: bool, cached_standings: pd.DataFrame = None) -> float:
         """Calculate composite score for a player.
         
         Args:
@@ -343,6 +348,7 @@ class DraftSimulator:
             team_name: Name of the drafting team
             tendency: Team's drafting tendency ('hitting' or 'pitching')
             is_pitcher: Whether the player is a pitcher
+            cached_standings: Pre-computed standings to avoid repeated recalculation
             
         Returns:
             Composite score (higher = more likely to be picked)
@@ -354,7 +360,7 @@ class DraftSimulator:
         score += positional_score * self.WEIGHT_POSITIONAL_NEED
         
         # Factor 2: Weakest Category Improvement (HIGH weight)
-        category_score = self._calculate_category_need(player_row, team_name, is_pitcher)
+        category_score = self._calculate_category_need(player_row, team_name, is_pitcher, cached_standings)
         score += category_score * self.WEIGHT_CATEGORY_NEED
         
         # Factor 3: Player Tendency (MEDIUM weight)
@@ -437,19 +443,23 @@ class DraftSimulator:
         
         return max_need_score
     
-    def _calculate_category_need(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
+    def _calculate_category_need(self, player_row: pd.Series, team_name: str, is_pitcher: bool, cached_standings: pd.DataFrame = None) -> float:
         """Calculate category need score based on team's weakest categories.
         
         Args:
             player_row: DataFrame row with player stats
             team_name: Name of the drafting team
             is_pitcher: Whether the player is a pitcher
+            cached_standings: Pre-computed standings to avoid repeated recalculation
             
         Returns:
             Category need score (0-100)
         """
-        # Get current standings to identify weak categories
-        standings = self.engine.get_standings()
+        # Use cached standings if provided, otherwise get current standings
+        if cached_standings is not None:
+            standings = cached_standings.copy()
+        else:
+            standings = self.engine.get_standings()
         
         # Calculate rankings for each category (1 = best, n = worst)
         category_rankings = {}
