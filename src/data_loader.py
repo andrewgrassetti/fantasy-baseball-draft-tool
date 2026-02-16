@@ -4,14 +4,14 @@ import os
 # --- COLUMN DEFINITIONS (matching R script) ---
 COLUMNS_TO_KEEP = {
     'batting': ['AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'ADP', 'PlayerId'],
-    'pitching': ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'ADP', 'PlayerId'],
+    'pitching': ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'QS', 'ADP', 'PlayerId'],
     'auction': ['Name', 'POS', 'PlayerId', 'Dollars'],
     'statcast': ['PlayerId', 'Barrel%', 'maxEV']
 }
 
 # Average patterns (columns to collapse via row-wise mean)
 BATTING_AVERAGES = ['AB', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'ADP', 'Dollars']
-PITCHING_AVERAGES = ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'ADP', 'Dollars']
+PITCHING_AVERAGES = ['IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'QS', 'ADP', 'Dollars']
 
 
 def _safe_read_csv(path):
@@ -329,7 +329,7 @@ def load_and_merge_data(data_dir="data"):
     
     # Select final columns (only those that exist)
     pitch_final_cols = ['Name', 'POS', 'PlayerId', 'Team', 'Type',
-                       'IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 
+                       'IP', 'SO', 'ERA', 'WHIP', 'WAR', 'K/9', 'SV', 'QS',
                        'ADP', 'Dollars', 'ER', 'H_BB']
     pitch_final_cols = [col for col in pitch_final_cols if col in pitch_merged.columns]
     pitch_final = pitch_merged[pitch_final_cols].copy()

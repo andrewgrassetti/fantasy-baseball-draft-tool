@@ -132,7 +132,7 @@ class Team:
         # Copy the previous `live_totals` logic here!
         totals = {
             'R': 0, 'HR': 0, 'RBI': 0, 'SB': 0, 'OBP': 0.000,
-            'K': 0, 'SV': 0, 'WAR': 0, 'ERA': 0.00, 'WHIP': 0.00
+            'K': 0, 'SV': 0, 'QS': 0, 'ERA': 0.00, 'WHIP': 0.00
         }
         
         total_ab = 0; total_on_base = 0
@@ -147,7 +147,7 @@ class Team:
                 if ab > 0: total_ab += ab; total_on_base += (obp * ab)
             else:
                 totals['K'] += s.get('SO', 0); totals['SV'] += s.get('SV', 0)
-                totals['WAR'] += s.get('WAR', 0)
+                totals['QS'] += s.get('QS', 0)
                 ip = s.get('IP', 0); era = s.get('ERA', 0); whip = s.get('WHIP', 0)
                 if ip > 0: total_ip += ip; total_er += (era * ip) / 9; total_wh += (whip * ip)
 
