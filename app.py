@@ -344,7 +344,13 @@ with tab1:
     st.divider()
     st.subheader("Top Available Players")
     
-    view_option = st.radio("View", ["Batters", "Pitchers"], horizontal=True)
+    if 'available_players_view' not in st.session_state:
+        st.session_state.available_players_view = "Batters"
+
+    view_options = ["Batters", "Pitchers"]
+    view_option = st.radio("View", view_options, horizontal=True,
+                           index=view_options.index(st.session_state.available_players_view))
+    st.session_state.available_players_view = view_option
     
     if view_option == "Batters":
         df_show = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
