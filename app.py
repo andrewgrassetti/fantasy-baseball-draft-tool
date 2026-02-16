@@ -353,7 +353,7 @@ with tab1:
         cols = [col for col in cols if col in df_show.columns]
     else:
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'K/9', 'WAR', 'ADP', 'Dollars']
+        cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
     
@@ -396,7 +396,7 @@ with tab2:
         default_y = 'HR'
     else:
         plot_df = engine.pitch_df.copy()
-        numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'WAR', 'IP', 'Dollars']
+        numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'K/9', 'WAR', 'IP', 'Dollars']
         default_x = 'ADP'
         default_y = 'ERA'
 
@@ -751,7 +751,7 @@ Team Alpha,4,hitting""", language="csv")
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
             else:
                 sim_df_show = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
-                sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'K/9', 'WAR', 'ADP', 'Dollars']
+                sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
             
             sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
@@ -786,7 +786,7 @@ Team Alpha,4,hitting""", language="csv")
                 sim_default_y = 'HR'
             else:
                 sim_plot_df = simulator.engine.pitch_df.copy()
-                sim_numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'K/9', 'WAR', 'IP', 'Dollars']
+                sim_numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'K/9', 'WAR', 'IP', 'Dollars']
                 sim_default_x = 'ADP'
                 sim_default_y = 'ERA'
             

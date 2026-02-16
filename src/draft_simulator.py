@@ -56,7 +56,7 @@ class DraftSimulator:
         '3B': 1.15,
         '2B': 1.10,
         'C':  0.85,
-        'SP': 1.25,
+        'SP': 1.35,
         'RP': 1.00,
     }
     
@@ -611,11 +611,11 @@ class DraftSimulator:
         category_score = 0.0
         
         if is_pitcher:
-            # Pitching categories: K, SV, WAR, ERA, WHIP
+            # Pitching categories: K, SV, QS, ERA, WHIP
             categories = {
                 'K': player_row.get('SO', 0),
                 'SV': player_row.get('SV', 0),
-                'WAR': player_row.get('WAR', 0),
+                'QS': player_row.get('QS', 0),
                 'ERA': player_row.get('ERA', 5.0),  # Lower is better
                 'WHIP': player_row.get('WHIP', 1.5)  # Lower is better
             }
