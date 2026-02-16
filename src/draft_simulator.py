@@ -453,7 +453,7 @@ class DraftSimulator:
             is_pitcher: Whether the player is a pitcher
             
         Returns:
-            Positional need score (0-100+, scaled by priority multiplier)
+            Positional need score (base 0-100, scaled by priority multiplier)
         """
         team = self.engine.teams[team_name]
         position = str(player_row['POS'])
