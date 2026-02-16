@@ -14,6 +14,13 @@ Positional need also acts as a hard filter: when a team has unfilled
 specific roster slots (C, 1B, 2B, 3B, SS, OF, SP, RP), the candidate
 pool is restricted to players eligible for those positions.  Once only
 generic slots remain (Util, P, BN), all available players are considered.
+
+Positional priority multipliers reflect real-world positional scarcity:
+  Offense (highest to lowest): 1B, OF, SS, 3B, 2B, C
+  Pitching (highest to lowest): SP, RP
+
+A power-law exponent is applied to composite scores before converting
+to probabilities, concentrating selection probability on top-valued players.
 """
 
 import pandas as pd
@@ -28,10 +35,30 @@ class DraftSimulator:
     """Simulates a fantasy baseball draft with probabilistic AI picks."""
     
     # Scoring weights for pick selection
-    WEIGHT_MARKET_VALUE = 5.0          # DOMINANT weight - dollar value is king
+    WEIGHT_MARKET_VALUE = 20.0         # DOMINANT weight - dollar value is king
     WEIGHT_POSITIONAL_NEED = 0.5       # SECONDARY weight - distant second
     WEIGHT_CATEGORY_NEED = 0.1         # LOW weight
     WEIGHT_TENDENCY = 0.1              # LOW weight
+    
+    # Power-law exponent applied to scores before converting to probabilities.
+    # Values > 1 concentrate selection probability on top-scored players.
+    SCORE_EXPONENT = 2.0
+    
+    # Positional priority multipliers reflecting positional scarcity.
+    # Applied to positional need scores so higher-priority positions are
+    # drafted earlier when multiple slots are open.
+    # Offense (high to low): 1B, OF, SS, 3B, 2B, C
+    # Pitching (high to low): SP, RP
+    POSITION_PRIORITY = {
+        '1B': 1.30,
+        'OF': 1.25,
+        'SS': 1.20,
+        '3B': 1.15,
+        '2B': 1.10,
+        'C':  0.85,
+        'SP': 1.25,
+        'RP': 1.00,
+    }
     
     # Small epsilon to ensure every player has nonzero selection probability
     EPSILON = 0.01
@@ -336,10 +363,12 @@ class DraftSimulator:
                 'dollars': row.get('Dollars', 0)
             })
         
-        # Convert scores to probabilities
+        # Convert scores to probabilities using power-law scaling
         scores_array = np.array([p['score'] for p in player_scores])
         # Add epsilon to ensure no zero probabilities
         scores_array = scores_array + self.EPSILON
+        # Apply power-law exponent to concentrate probability on top-scored players
+        scores_array = np.power(scores_array, self.SCORE_EXPONENT)
         probabilities = scores_array / scores_array.sum()
         
         # Select player using weighted random choice
@@ -412,7 +441,11 @@ class DraftSimulator:
         return max(score, 0.0)  # Ensure non-negative
     
     def _calculate_positional_need(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
-        """Calculate positional need score.
+        """Calculate positional need score with positional priority weighting.
+        
+        Positional priority multipliers (from POSITION_PRIORITY) reflect
+        real-world positional scarcity so that higher-demand positions are
+        preferred when multiple slots are open.
         
         Args:
             player_row: DataFrame row with player stats
@@ -420,7 +453,7 @@ class DraftSimulator:
             is_pitcher: Whether the player is a pitcher
             
         Returns:
-            Positional need score (0-100)
+            Positional need score (0-100+, scaled by priority multiplier)
         """
         team = self.engine.teams[team_name]
         position = str(player_row['POS'])
@@ -446,6 +479,9 @@ class DraftSimulator:
                         if filled < limit:
                             # Empty or partially filled slot = high need
                             need = 100.0 * (1.0 - filled / limit)
+                            # Apply positional priority multiplier
+                            priority = self.POSITION_PRIORITY.get(pos, 1.0)
+                            need *= priority
                             max_need_score = max(max_need_score, need)
                 
                 # Generic pitcher - check P slot
@@ -462,6 +498,9 @@ class DraftSimulator:
                     limit = team.SLOT_LIMITS[pos]
                     if filled < limit:
                         need = 100.0 * (1.0 - filled / limit)
+                        # Apply positional priority multiplier
+                        priority = self.POSITION_PRIORITY.get(pos, 1.0)
+                        need *= priority
                         max_need_score = max(max_need_score, need)
                 
                 # Check Util slot
