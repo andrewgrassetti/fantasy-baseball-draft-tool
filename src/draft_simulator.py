@@ -10,10 +10,17 @@ Provides probabilistic draft simulation functionality that:
   3. Category need (LOW weight)
   4. Player tendency (LOW weight)
 
-Positional need also acts as a hard filter: when a team has unfilled
-specific roster slots (C, 1B, 2B, 3B, SS, OF, SP, RP), the candidate
-pool is restricted to players eligible for those positions.  Once only
-generic slots remain (Util, P, BN), all available players are considered.
+While flex slots (Util, P, BN) remain open, the AI considers ALL
+available players regardless of position so that high-value players
+are never ignored simply because their primary position slot is filled
+(e.g. drafting two elite 1B before a low-value C).  A soft positional
+need score still gives a bonus to players who fill empty specific
+slots, providing a natural pull toward roster balance.
+
+Once every flex slot is filled, a hard positional filter restricts
+candidates to players eligible for the remaining unfilled specific
+slots (C, 1B, 2B, 3B, SS, OF, SP, RP), ensuring a legal roster by
+the end of the draft.
 
 Positional priority multipliers reflect real-world positional scarcity:
   Offense (highest to lowest): 1B, OF, SS, 3B, 2B, C
@@ -42,7 +49,7 @@ class DraftSimulator:
     
     # Power-law exponent applied to scores before converting to probabilities.
     # Values > 1 concentrate selection probability on top-scored players.
-    SCORE_EXPONENT = 2.0
+    SCORE_EXPONENT = 3.0
     
     # Positional priority multipliers reflecting positional scarcity.
     # Applied to positional need scores so higher-priority positions are
@@ -64,7 +71,7 @@ class DraftSimulator:
     EPSILON = 0.01
     
     # Maximum number of top players (by Dollar value) to consider per pick
-    TOP_N_PLAYERS = 500
+    TOP_N_PLAYERS = 50
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
         """Initialize the draft simulator.
@@ -298,24 +305,28 @@ class DraftSimulator:
         available_batters = available_batters[available_batters['Name'].notna()]
         available_pitchers = available_pitchers[available_pitchers['Name'].notna()]
         
-        # Hard positional filter: when specific roster slots are still open,
-        # restrict candidates to players eligible for those positions.
-        needed_positions = self._get_needed_positions(team_name)
-        if needed_positions:
-            filtered_batters = available_batters[
-                available_batters['POS'].apply(
-                    lambda pos: self._has_needed_position(pos, needed_positions)
-                )
-            ]
-            filtered_pitchers = available_pitchers[
-                available_pitchers['POS'].apply(
-                    lambda pos: self._has_needed_position(pos, needed_positions)
-                )
-            ]
-            # Only apply filter if it leaves at least one candidate
-            if not filtered_batters.empty or not filtered_pitchers.empty:
-                available_batters = filtered_batters
-                available_pitchers = filtered_pitchers
+        # Hard positional filter: only applied when flex slots (Util, P, BN)
+        # are all full — at that point every remaining pick MUST go to an
+        # unfilled specific position to ensure a legal roster.  While flex
+        # slots remain, all players are considered so the AI can chase value
+        # (e.g. drafting two elite 1B before a low-value C).
+        if not self._has_flex_slots(team_name):
+            needed_positions = self._get_needed_positions(team_name)
+            if needed_positions:
+                filtered_batters = available_batters[
+                    available_batters['POS'].apply(
+                        lambda pos: self._has_needed_position(pos, needed_positions)
+                    )
+                ]
+                filtered_pitchers = available_pitchers[
+                    available_pitchers['POS'].apply(
+                        lambda pos: self._has_needed_position(pos, needed_positions)
+                    )
+                ]
+                # Only apply filter if it leaves at least one candidate
+                if not filtered_batters.empty or not filtered_pitchers.empty:
+                    available_batters = filtered_batters
+                    available_pitchers = filtered_pitchers
         
         available_batters = available_batters.nlargest(self.TOP_N_PLAYERS, 'Dollars')
         available_pitchers = available_pitchers.nlargest(self.TOP_N_PLAYERS, 'Dollars')
@@ -541,6 +552,25 @@ class DraftSimulator:
                 if team.slots_filled.get(pos, 0) < team.SLOT_LIMITS[pos]:
                     needed.add(pos)
         return needed
+    
+    def _has_flex_slots(self, team_name: str) -> bool:
+        """Check whether the team still has generic/flex roster slots open.
+        
+        Flex slots are Util, P, and BN — they can absorb a player of any
+        position.  While at least one is open, the hard positional filter
+        is not applied so the AI can chase value regardless of position.
+        
+        Args:
+            team_name: Name of the team
+            
+        Returns:
+            True if at least one Util, P, or BN slot is unfilled
+        """
+        team = self.engine.teams[team_name]
+        for slot in ('Util', 'P', 'BN'):
+            if team.slots_filled.get(slot, 0) < team.SLOT_LIMITS.get(slot, 0):
+                return True
+        return False
     
     def _has_needed_position(self, position_str, needed_positions: set) -> bool:
         """Check if a position string contains any needed position.
