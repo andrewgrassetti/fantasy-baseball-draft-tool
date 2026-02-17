@@ -42,7 +42,7 @@ class DraftSimulator:
     
     # Power-law exponent applied to scores before converting to probabilities.
     # Values > 1 concentrate selection probability on top-scored players.
-    SCORE_EXPONENT = 2.0
+    SCORE_EXPONENT = 3.0
     
     # Positional priority multipliers reflecting positional scarcity.
     # Applied to positional need scores so higher-priority positions are
@@ -64,7 +64,7 @@ class DraftSimulator:
     EPSILON = 0.01
     
     # Maximum number of top players (by Dollar value) to consider per pick
-    TOP_N_PLAYERS = 500
+    TOP_N_PLAYERS = 50
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
         """Initialize the draft simulator.
