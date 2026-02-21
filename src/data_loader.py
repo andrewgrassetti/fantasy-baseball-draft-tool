@@ -161,7 +161,13 @@ def load_and_merge_data(data_dir="data"):
         statcast_bat = _standardize_columns(statcast_bat)
         statcast_bat = _filter_columns(statcast_bat, COLUMNS_TO_KEEP['statcast'])
     
-    # 4. Wide merge: auctions + projections + statcast
+    # 4. Collect auction PlayerIds (defines the draftable player universe)
+    bat_auction_ids = set()
+    for adf in bat_auctions:
+        if 'PlayerId' in adf.columns:
+            bat_auction_ids.update(adf['PlayerId'].values)
+    
+    # 5. Wide merge: auctions + projections + statcast
     merge_list = []
     merge_list.extend(bat_auctions)
     merge_list.extend(bat_projections)
@@ -172,6 +178,12 @@ def load_and_merge_data(data_dir="data"):
         raise FileNotFoundError("No batting data files found!")
     
     bat_merged = _merge_dfs(merge_list, by_col='PlayerId')
+    
+    # 6. Filter to only include players from auction sources
+    # Projection-only players (not in any auction file) have no fantasy value
+    # and would otherwise swamp the available player pool with thousands of $0 entries
+    if bat_auction_ids:
+        bat_merged = bat_merged[bat_merged['PlayerId'].isin(bat_auction_ids)]
     
     # 5. Row-wise averaging
     bat_merged = _average_columns(bat_merged, BATTING_AVERAGES, digits=3)
@@ -261,7 +273,13 @@ def load_and_merge_data(data_dir="data"):
             if df is not None:
                 pitch_projections.append(df)
     
-    # 3. Wide merge: auctions + projections
+    # 3. Collect auction PlayerIds (defines the draftable player universe)
+    pitch_auction_ids = set()
+    for adf in pitch_auctions:
+        if 'PlayerId' in adf.columns:
+            pitch_auction_ids.update(adf['PlayerId'].values)
+    
+    # 4. Wide merge: auctions + projections
     merge_list = []
     merge_list.extend(pitch_auctions)
     merge_list.extend(pitch_projections)
@@ -271,10 +289,16 @@ def load_and_merge_data(data_dir="data"):
     
     pitch_merged = _merge_dfs(merge_list, by_col='PlayerId')
     
-    # 4. Row-wise averaging
+    # 5. Filter to only include players from auction sources
+    # Projection-only players (not in any auction file) have no fantasy value
+    # and would otherwise swamp the available player pool with thousands of $0 entries
+    if pitch_auction_ids:
+        pitch_merged = pitch_merged[pitch_merged['PlayerId'].isin(pitch_auction_ids)]
+    
+    # 6. Row-wise averaging
     pitch_merged = _average_columns(pitch_merged, PITCHING_AVERAGES, digits=3)
     
-    # 5. Ensure downstream compatibility columns
+    # 7. Ensure downstream compatibility columns
     pitch_merged['Type'] = 'Pitcher'
     
     # Fill Dollars with 0 if missing

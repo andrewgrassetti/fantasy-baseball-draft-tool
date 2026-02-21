@@ -363,8 +363,8 @@ with tab1:
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
     
-    # Sort by Dollars (auction value) descending
-    df_show = df_show.sort_values(by='Dollars', ascending=False)
+    # Sort by ADP (Average Draft Position) ascending — lower ADP = more valuable
+    df_show = df_show.sort_values(by='ADP', ascending=True)
     
     # Pagination: 50 players per page
     players_per_page = 50
@@ -760,7 +760,7 @@ Team Alpha,4,hitting""", language="csv")
                 sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
             
-            sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
+            sim_df_show = sim_df_show.sort_values(by='ADP', ascending=True)
             
             sim_players_per_page = 50
             sim_total_players = len(sim_df_show)
