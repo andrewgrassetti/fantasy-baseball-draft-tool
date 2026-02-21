@@ -305,6 +305,12 @@ class DraftSimulator:
         available_batters = available_batters[available_batters['Name'].notna()]
         available_pitchers = available_pitchers[available_pitchers['Name'].notna()]
         
+        # Filter out players with no team (free agents/retired/out-of-league)
+        if 'Team' in available_batters.columns:
+            available_batters = available_batters[available_batters['Team'].notna()]
+        if 'Team' in available_pitchers.columns:
+            available_pitchers = available_pitchers[available_pitchers['Team'].notna()]
+        
         # Hard positional filter: only applied when flex slots (Util, P, BN)
         # are all full — at that point every remaining pick MUST go to an
         # unfilled specific position to ensure a legal roster.  While flex

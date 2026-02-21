@@ -161,7 +161,13 @@ def load_and_merge_data(data_dir="data"):
         statcast_bat = _standardize_columns(statcast_bat)
         statcast_bat = _filter_columns(statcast_bat, COLUMNS_TO_KEEP['statcast'])
     
-    # 4. Wide merge: auctions + projections + statcast
+    # 4. Collect auction PlayerIds (defines the draftable player universe)
+    bat_auction_ids = set()
+    for adf in bat_auctions:
+        if 'PlayerId' in adf.columns:
+            bat_auction_ids.update(adf['PlayerId'].values)
+    
+    # 5. Wide merge: auctions + projections + statcast
     merge_list = []
     merge_list.extend(bat_auctions)
     merge_list.extend(bat_projections)
@@ -173,17 +179,23 @@ def load_and_merge_data(data_dir="data"):
     
     bat_merged = _merge_dfs(merge_list, by_col='PlayerId')
     
-    # 5. Row-wise averaging
+    # 6. Filter to only include players from auction sources
+    # Projection-only players (not in any auction file) have no fantasy value
+    # and would otherwise swamp the available player pool with thousands of $0 entries
+    if bat_auction_ids:
+        bat_merged = bat_merged[bat_merged['PlayerId'].isin(bat_auction_ids)]
+    
+    # 7. Row-wise averaging
     bat_merged = _average_columns(bat_merged, BATTING_AVERAGES, digits=3)
     
-    # 6. Add Barrel_prc if Barrel% exists
+    # 8. Add Barrel_prc if Barrel% exists
     # Note: Barrel% from statcast is a decimal (0-1, e.g., 0.268 = 26.8% barrel rate)
     # Barrel_prc converts to percentage scale (0-100) for easier interpretation
     # Keeping both for flexibility in downstream visualizations
     if 'Barrel%' in bat_merged.columns:
         bat_merged['Barrel_prc'] = (bat_merged['Barrel%'] * 100).round(3)
     
-    # 7. Ensure downstream compatibility columns
+    # 9. Ensure downstream compatibility columns
     bat_merged['Type'] = 'Batter'
     
     # Fill Dollars with 0 if missing
@@ -261,7 +273,13 @@ def load_and_merge_data(data_dir="data"):
             if df is not None:
                 pitch_projections.append(df)
     
-    # 3. Wide merge: auctions + projections
+    # 3. Collect auction PlayerIds (defines the draftable player universe)
+    pitch_auction_ids = set()
+    for adf in pitch_auctions:
+        if 'PlayerId' in adf.columns:
+            pitch_auction_ids.update(adf['PlayerId'].values)
+    
+    # 4. Wide merge: auctions + projections
     merge_list = []
     merge_list.extend(pitch_auctions)
     merge_list.extend(pitch_projections)
@@ -271,10 +289,16 @@ def load_and_merge_data(data_dir="data"):
     
     pitch_merged = _merge_dfs(merge_list, by_col='PlayerId')
     
-    # 4. Row-wise averaging
+    # 5. Filter to only include players from auction sources
+    # Projection-only players (not in any auction file) have no fantasy value
+    # and would otherwise swamp the available player pool with thousands of $0 entries
+    if pitch_auction_ids:
+        pitch_merged = pitch_merged[pitch_merged['PlayerId'].isin(pitch_auction_ids)]
+    
+    # 6. Row-wise averaging
     pitch_merged = _average_columns(pitch_merged, PITCHING_AVERAGES, digits=3)
     
-    # 5. Ensure downstream compatibility columns
+    # 7. Ensure downstream compatibility columns
     pitch_merged['Type'] = 'Pitcher'
     
     # Fill Dollars with 0 if missing
@@ -333,5 +357,25 @@ def load_and_merge_data(data_dir="data"):
                        'ADP', 'Dollars', 'ER', 'H_BB']
     pitch_final_cols = [col for col in pitch_final_cols if col in pitch_merged.columns]
     pitch_final = pitch_merged[pitch_final_cols].copy()
+    
+    # --- NORMALIZE DOLLAR VALUES ---
+    # Auction dollar values can be negative (e.g., min around -70).
+    # Shift all values up so the lowest becomes 1, ensuring every player
+    # has a positive value for proper sorting and simulator weighting.
+    if not bat_final.empty and not pitch_final.empty:
+        overall_min = min(bat_final['Dollars'].min(), pitch_final['Dollars'].min())
+    elif not bat_final.empty:
+        overall_min = bat_final['Dollars'].min()
+    elif not pitch_final.empty:
+        overall_min = pitch_final['Dollars'].min()
+    else:
+        overall_min = 0
+    
+    if overall_min < 1:
+        shift = abs(overall_min) + 1
+        if not bat_final.empty:
+            bat_final['Dollars'] = (bat_final['Dollars'] + shift).round(3)
+        if not pitch_final.empty:
+            pitch_final['Dollars'] = (pitch_final['Dollars'] + shift).round(3)
     
     return bat_final, pitch_final
