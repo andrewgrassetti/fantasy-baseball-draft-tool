@@ -362,10 +362,20 @@ def load_and_merge_data(data_dir="data"):
     # Auction dollar values can be negative (e.g., min around -70).
     # Shift all values up so the lowest becomes 1, ensuring every player
     # has a positive value for proper sorting and simulator weighting.
-    overall_min = min(bat_final['Dollars'].min(), pitch_final['Dollars'].min())
+    if not bat_final.empty and not pitch_final.empty:
+        overall_min = min(bat_final['Dollars'].min(), pitch_final['Dollars'].min())
+    elif not bat_final.empty:
+        overall_min = bat_final['Dollars'].min()
+    elif not pitch_final.empty:
+        overall_min = pitch_final['Dollars'].min()
+    else:
+        overall_min = 0
+    
     if overall_min < 1:
         shift = abs(overall_min) + 1
-        bat_final['Dollars'] = (bat_final['Dollars'] + shift).round(3)
-        pitch_final['Dollars'] = (pitch_final['Dollars'] + shift).round(3)
+        if not bat_final.empty:
+            bat_final['Dollars'] = (bat_final['Dollars'] + shift).round(3)
+        if not pitch_final.empty:
+            pitch_final['Dollars'] = (pitch_final['Dollars'] + shift).round(3)
     
     return bat_final, pitch_final
