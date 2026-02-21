@@ -363,24 +363,13 @@ with tab1:
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
     
-    # Sort by ADP (Average Draft Position) ascending — lower ADP = more valuable
-    if 'ADP' in df_show.columns:
-        df_show = df_show.sort_values(by='ADP', ascending=True)
-    else:
-        df_show = df_show.sort_values(by='Dollars', ascending=False)
+    # Default sort by Dollars descending (highest value first)
+    df_show = df_show.sort_values(by='Dollars', ascending=False)
     
-    # Pagination: 50 players per page
-    players_per_page = 50
     total_players = len(df_show)
-    total_pages = (total_players + players_per_page - 1) // players_per_page  # Ceiling division
-    
-    if total_pages > 0:
-        page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
-        start_idx = (page - 1) * players_per_page
-        end_idx = min(start_idx + players_per_page, total_players)
-        
-        st.caption(f"Showing {start_idx + 1}–{end_idx} of {total_players} players")
-        st.dataframe(df_show[cols].iloc[start_idx:end_idx], hide_index=True)
+    if total_players > 0:
+        st.caption(f"{total_players} available players — click any column header to re-sort")
+        st.dataframe(df_show[cols], hide_index=True, height=600)
     else:
         st.info("No available players found.")
 
@@ -763,22 +752,12 @@ Team Alpha,4,hitting""", language="csv")
                 sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
             
-            if 'ADP' in sim_df_show.columns:
-                sim_df_show = sim_df_show.sort_values(by='ADP', ascending=True)
-            else:
-                sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
+            sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
             
-            sim_players_per_page = 50
             sim_total_players = len(sim_df_show)
-            sim_total_pages = (sim_total_players + sim_players_per_page - 1) // sim_players_per_page
-            
-            if sim_total_pages > 0:
-                sim_page = st.number_input("Page", min_value=1, max_value=sim_total_pages, value=1, step=1, key="sim_page")
-                sim_start_idx = (sim_page - 1) * sim_players_per_page
-                sim_end_idx = min(sim_start_idx + sim_players_per_page, sim_total_players)
-                
-                st.caption(f"Showing {sim_start_idx + 1}–{sim_end_idx} of {sim_total_players} players")
-                st.dataframe(sim_df_show[sim_cols].iloc[sim_start_idx:sim_end_idx], hide_index=True)
+            if sim_total_players > 0:
+                st.caption(f"{sim_total_players} available players — click any column header to re-sort")
+                st.dataframe(sim_df_show[sim_cols], hide_index=True, height=600)
             else:
                 st.info("No available players found.")
             

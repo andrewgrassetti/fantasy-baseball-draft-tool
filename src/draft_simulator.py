@@ -451,8 +451,16 @@ class DraftSimulator:
         tendency_score = self._calculate_tendency_score(tendency, is_pitcher)
         score += tendency_score * self.WEIGHT_TENDENCY
         
-        # Factor 4: Market Value Baseline
+        # Factor 4: Market Value Baseline with ADP cross-validation
         market_score = player_row.get('Dollars', 0)
+        adp = player_row.get('ADP', 999)
+        
+        # Cross-check: players with positive Dollars but ADP == 999
+        # are suspect (may be data artifacts or players not actually draftable).
+        # Halve their market contribution so truly draftable players are preferred.
+        if market_score > 0 and adp >= 999:
+            market_score *= 0.5
+        
         score += market_score * self.WEIGHT_MARKET_VALUE
         
         return max(score, 0.0)  # Ensure non-negative
