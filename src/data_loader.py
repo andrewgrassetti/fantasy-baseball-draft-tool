@@ -358,4 +358,14 @@ def load_and_merge_data(data_dir="data"):
     pitch_final_cols = [col for col in pitch_final_cols if col in pitch_merged.columns]
     pitch_final = pitch_merged[pitch_final_cols].copy()
     
+    # --- NORMALIZE DOLLAR VALUES ---
+    # Auction dollar values can be negative (e.g., min around -70).
+    # Shift all values up so the lowest becomes 1, ensuring every player
+    # has a positive value for proper sorting and simulator weighting.
+    overall_min = min(bat_final['Dollars'].min(), pitch_final['Dollars'].min())
+    if overall_min < 1:
+        shift = abs(overall_min) + 1
+        bat_final['Dollars'] = (bat_final['Dollars'] + shift).round(3)
+        pitch_final['Dollars'] = (pitch_final['Dollars'] + shift).round(3)
+    
     return bat_final, pitch_final
