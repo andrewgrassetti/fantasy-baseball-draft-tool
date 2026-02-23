@@ -9,6 +9,7 @@ Provides probabilistic draft simulation functionality that:
   2. Positional need (SECONDARY weight - distant second to value)
   3. Category need (LOW weight)
   4. Player tendency (LOW weight)
+  5. Position redundancy penalty (multiplicative — see below)
 
 While flex slots (Util, P, BN) remain open, the AI considers ALL
 available players regardless of position so that high-value players
@@ -25,6 +26,14 @@ the end of the draft.
 Positional priority multipliers reflect real-world positional scarcity:
   Offense (highest to lowest): 1B, OF, SS, 3B, 2B, C
   Pitching (highest to lowest): SP, RP
+
+Position redundancy downweighting penalizes drafting surplus players at
+the same position.  Catcher is the most aggressively penalized (rarely
+should a team draft more than 1 C); OF and 1B carry the lightest
+penalties because extra OF/1B often make good Util/bench players.
+
+Dollar values are expanded via a power function (DOLLAR_EXPANSION_EXPONENT)
+before weighting, increasing the gap between high- and low-value players.
 
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
@@ -66,6 +75,26 @@ class DraftSimulator:
         'SP': 1.35,
         'RP': 1.00,
     }
+    
+    # Position redundancy multipliers applied to the composite score.
+    # Each list is indexed by the number of rostered players at that position.
+    # Index 0 = multiplier when 0 already rostered, index 1 = when 1 rostered, etc.
+    # Catcher is most aggressively penalized; OF and 1B are least penalized
+    # because they are more likely to provide Util/bench value.
+    POSITION_REDUNDANCY = {
+        'C':  [1.0, 0.08, 0.01],              # 1 C slot; 2nd C is rare, 3rd almost never
+        'SS': [1.0, 0.35, 0.08],              # 1 SS slot
+        '2B': [1.0, 0.35, 0.08],              # 1 2B slot
+        '3B': [1.0, 0.35, 0.08],              # 1 3B slot
+        '1B': [1.0, 0.55, 0.25],              # 1 1B slot; power bats fine as Util
+        'OF': [1.0, 1.0, 1.0, 0.55, 0.25],    # 3 OF slots; extras are OK
+        'SP': [1.0, 1.0, 1.0, 0.65, 0.35],    # 3 SP slots
+        'RP': [1.0, 1.0, 0.45, 0.15],          # 2 RP slots
+    }
+    
+    # Exponent applied to dollar values before scoring.  Values > 1 widen the
+    # gap between high- and low-dollar players so that picks are more decisive.
+    DOLLAR_EXPANSION_EXPONENT = 1.4
     
     # Small epsilon to ensure every player has nonzero selection probability
     EPSILON = 0.01
@@ -457,9 +486,16 @@ class DraftSimulator:
         tendency_score = self._calculate_tendency_score(tendency, is_pitcher)
         score += tendency_score * self.WEIGHT_TENDENCY
         
-        # Factor 4: Market Value Baseline
-        market_score = player_row.get('Dollars', 0)
+        # Factor 4: Market Value Baseline (dollar expansion widens the gap
+        # between high- and low-value players before weighting)
+        raw_dollars = max(player_row.get('Dollars', 0), 0.0)
+        market_score = raw_dollars ** self.DOLLAR_EXPANSION_EXPONENT
         score += market_score * self.WEIGHT_MARKET_VALUE
+        
+        # Factor 5: Position redundancy penalty — reduce score when the team
+        # already has players at this position to prevent over-drafting
+        redundancy_multiplier = self._get_position_redundancy_multiplier(player_row, team_name, is_pitcher)
+        score *= redundancy_multiplier
         
         return max(score, 0.0)  # Ensure non-negative
     
@@ -598,6 +634,58 @@ class DraftSimulator:
             return False
         positions = [p.strip() for p in str(position_str).split('/')]
         return any(p in needed_positions for p in positions)
+    
+    def _get_position_redundancy_multiplier(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
+        """Return a score multiplier (0-1) that penalizes drafting surplus players
+        at the same position.
+
+        The multiplier is looked up from POSITION_REDUNDANCY using the number of
+        players already on the roster who share at least one eligible position
+        with the incoming player.  For multi-position players (e.g. "C/1B") the
+        *best* (highest) multiplier across eligible positions is used so that a
+        player is not penalized for their secondary position when their primary
+        position is already stocked.
+
+        Args:
+            player_row: DataFrame row with player stats
+            team_name: Name of the drafting team
+            is_pitcher: Whether the player is a pitcher
+
+        Returns:
+            Multiplier in (0, 1] to apply to the composite score
+        """
+        team = self.engine.teams[team_name]
+        position = str(player_row['POS'])
+
+        if pd.isna(position) or position == 'nan':
+            return 1.0
+
+        eligible_positions = [p.strip() for p in position.split('/')]
+
+        best_multiplier = None
+
+        for pos in eligible_positions:
+            redundancy_table = self.POSITION_REDUNDANCY.get(pos)
+            if redundancy_table is None:
+                # Unknown position — no penalty
+                best_multiplier = 1.0
+                continue
+
+            # Count rostered players who list this position
+            count = 0
+            for player in team.roster:
+                if player.position is None or (isinstance(player.position, float) and pd.isna(player.position)):
+                    continue
+                player_positions = [p.strip() for p in str(player.position).split('/')]
+                if pos in player_positions:
+                    count += 1
+
+            idx = min(count, len(redundancy_table) - 1)
+            multiplier = redundancy_table[idx]
+            if best_multiplier is None or multiplier > best_multiplier:
+                best_multiplier = multiplier
+
+        return best_multiplier if best_multiplier is not None else 1.0
     
     def _compute_category_rankings(self, standings: pd.DataFrame, team_name: str) -> Dict:
         """Pre-compute category rankings for a team from standings.
