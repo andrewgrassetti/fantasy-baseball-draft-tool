@@ -357,14 +357,27 @@ with tab1:
         cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
+        # Collect unique individual positions from multi-position strings
+        all_positions = set()
+        for pos in df_show['POS'].dropna().unique():
+            for p in str(pos).split('/'):
+                all_positions.add(p.strip())
+        all_positions = sorted(all_positions)
     else:
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
         cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
+        all_positions = sorted(df_show['POS'].dropna().unique())
+    
+    # Position filter
+    pos_filter_col, sort_col1, sort_col2 = st.columns([2, 2, 1])
+    with pos_filter_col:
+        pos_filter = st.selectbox("Filter by Position", ["All"] + all_positions, index=0, key="avail_pos_filter")
+    if pos_filter != "All":
+        df_show = df_show[df_show['POS'].fillna('').apply(lambda x: pos_filter in [p.strip() for p in str(x).split('/')])]
     
     # Sort controls for the full player pool
-    sort_col1, sort_col2 = st.columns([2, 1])
     with sort_col1:
         sort_by = st.selectbox("Sort by", cols, index=cols.index('Dollars') if 'Dollars' in cols else 0, key="avail_sort_by")
     with sort_col2:
@@ -744,6 +757,85 @@ Team Alpha,4,hitting""", language="csv")
             standings = simulator.get_standings()
             st.dataframe(standings, hide_index=True, width="stretch")
             
+            # --- TEAM ROSTERS ---
+            st.divider()
+            st.subheader("👥 Team Rosters")
+            
+            sim_roster_view_mode = st.radio("View Mode", ["All Teams", "Single Team"], horizontal=True, key="sim_roster_view_mode")
+            
+            sim_team_names = sorted(simulator.engine.teams.keys())
+            
+            sim_selected_team = None
+            if sim_roster_view_mode == "Single Team":
+                sim_selected_team = st.selectbox("Select Team", sim_team_names, key="sim_roster_team")
+            
+            for sim_team_name in sim_team_names:
+                sim_roster_df = simulator.engine.get_team_roster_df(sim_team_name)
+                sim_player_count = len(sim_roster_df)
+                
+                sim_is_expanded = False
+                if sim_roster_view_mode == "Single Team" and sim_team_name == sim_selected_team:
+                    sim_is_expanded = True
+                
+                with st.expander(f"**{sim_team_name}** — {sim_player_count} players", expanded=sim_is_expanded):
+                    if sim_roster_df.empty:
+                        st.info("No players drafted yet.")
+                    else:
+                        sim_summary = simulator.engine.get_roster_summary(sim_team_name)
+                        
+                        st.markdown("**Roster Slot Summary**")
+                        scol1, scol2, scol3 = st.columns(3)
+                        
+                        with scol1:
+                            st.markdown("**Batting Slots**")
+                            for slot in ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']:
+                                filled = sim_summary[slot]['filled']
+                                limit = sim_summary[slot]['limit']
+                                st.text(f"{slot}: {filled}/{limit}")
+                        
+                        with scol2:
+                            st.markdown("**Pitching Slots**")
+                            for slot in ['SP', 'RP', 'P']:
+                                filled = sim_summary[slot]['filled']
+                                limit = sim_summary[slot]['limit']
+                                st.text(f"{slot}: {filled}/{limit}")
+                        
+                        with scol3:
+                            st.markdown("**Bench / Reserve**")
+                            for slot in ['BN', 'IL', 'NA']:
+                                filled = sim_summary[slot]['filled']
+                                limit = sim_summary[slot]['limit']
+                                st.text(f"{slot}: {filled}/{limit}")
+                        
+                        st.divider()
+                        
+                        st.markdown("**Roster Table**")
+                        rcol_left, rcol_right = st.columns(2)
+                        
+                        with rcol_left:
+                            st.markdown("**Batters**")
+                            sim_batters = sim_roster_df[sim_roster_df['Type'] == 'Batter']
+                            if sim_batters.empty:
+                                st.caption("None drafted.")
+                            else:
+                                st.dataframe(
+                                    sim_batters[['Name', 'POS', 'MLB Team', 'Dollars']],
+                                    hide_index=True,
+                                    width="stretch"
+                                )
+                        
+                        with rcol_right:
+                            st.markdown("**Pitchers**")
+                            sim_pitchers = sim_roster_df[sim_roster_df['Type'] == 'Pitcher']
+                            if sim_pitchers.empty:
+                                st.caption("None drafted.")
+                            else:
+                                st.dataframe(
+                                    sim_pitchers[['Name', 'POS', 'MLB Team', 'Dollars']],
+                                    hide_index=True,
+                                    width="stretch"
+                                )
+            
             # --- AVAILABLE PLAYER RANKS ---
             st.divider()
             st.subheader("Top Available Players")
@@ -754,13 +846,25 @@ Team Alpha,4,hitting""", language="csv")
                 sim_df_show = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available'].copy()
                 sim_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+                sim_all_positions = set()
+                for pos in sim_df_show['POS'].dropna().unique():
+                    for p in str(pos).split('/'):
+                        sim_all_positions.add(p.strip())
+                sim_all_positions = sorted(sim_all_positions)
             else:
                 sim_df_show = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
                 sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+                sim_all_positions = sorted(sim_df_show['POS'].dropna().unique())
+            
+            # Position filter
+            sim_pos_filter_col, sim_sort_col1, sim_sort_col2 = st.columns([2, 2, 1])
+            with sim_pos_filter_col:
+                sim_pos_filter = st.selectbox("Filter by Position", ["All"] + sim_all_positions, index=0, key="sim_pos_filter")
+            if sim_pos_filter != "All":
+                sim_df_show = sim_df_show[sim_df_show['POS'].fillna('').apply(lambda x: sim_pos_filter in [p.strip() for p in str(x).split('/')])]
             
             # Sort controls for the full player pool
-            sim_sort_col1, sim_sort_col2 = st.columns([2, 1])
             with sim_sort_col1:
                 sim_sort_by = st.selectbox("Sort by", sim_cols, index=sim_cols.index('Dollars') if 'Dollars' in sim_cols else 0, key="sim_sort_by")
             with sim_sort_col2:
