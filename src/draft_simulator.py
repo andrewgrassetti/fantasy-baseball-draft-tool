@@ -27,8 +27,8 @@ Positional priority multipliers reflect real-world positional scarcity:
   Offense (highest to lowest): 1B, OF, SS, 3B, 2B, C
   Pitching (highest to lowest): SP, RP
 
-Position redundancy downweighting penalises drafting surplus players at
-the same position.  Catcher is the most aggressively penalised (rarely
+Position redundancy downweighting penalizes drafting surplus players at
+the same position.  Catcher is the most aggressively penalized (rarely
 should a team draft more than 1 C); OF and 1B carry the lightest
 penalties because extra OF/1B often make good Util/bench players.
 
@@ -636,14 +636,14 @@ class DraftSimulator:
         return any(p in needed_positions for p in positions)
     
     def _get_position_redundancy_multiplier(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
-        """Return a score multiplier (0-1) that penalises drafting surplus players
+        """Return a score multiplier (0-1) that penalizes drafting surplus players
         at the same position.
 
         The multiplier is looked up from POSITION_REDUNDANCY using the number of
         players already on the roster who share at least one eligible position
         with the incoming player.  For multi-position players (e.g. "C/1B") the
         *best* (highest) multiplier across eligible positions is used so that a
-        player is not penalised for their secondary position when their primary
+        player is not penalized for their secondary position when their primary
         position is already stocked.
 
         Args:
@@ -662,13 +662,13 @@ class DraftSimulator:
 
         eligible_positions = [p.strip() for p in position.split('/')]
 
-        best_multiplier = 0.0
+        best_multiplier = None
 
         for pos in eligible_positions:
             redundancy_table = self.POSITION_REDUNDANCY.get(pos)
             if redundancy_table is None:
                 # Unknown position — no penalty
-                best_multiplier = max(best_multiplier, 1.0)
+                best_multiplier = 1.0
                 continue
 
             # Count rostered players who list this position
@@ -681,9 +681,11 @@ class DraftSimulator:
                     count += 1
 
             idx = min(count, len(redundancy_table) - 1)
-            best_multiplier = max(best_multiplier, redundancy_table[idx])
+            multiplier = redundancy_table[idx]
+            if best_multiplier is None or multiplier > best_multiplier:
+                best_multiplier = multiplier
 
-        return best_multiplier if best_multiplier > 0 else 1.0
+        return best_multiplier if best_multiplier is not None else 1.0
     
     def _compute_category_rankings(self, standings: pd.DataFrame, team_name: str) -> Dict:
         """Pre-compute category rankings for a team from standings.
