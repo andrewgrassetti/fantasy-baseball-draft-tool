@@ -42,14 +42,14 @@ class DraftSimulator:
     """Simulates a fantasy baseball draft with probabilistic AI picks."""
     
     # Scoring weights for pick selection
-    WEIGHT_MARKET_VALUE = 20.0         # DOMINANT weight - dollar value is king
+    WEIGHT_MARKET_VALUE = 35.0         # DOMINANT weight - dollar value is king
     WEIGHT_POSITIONAL_NEED = 0.5       # SECONDARY weight - distant second
     WEIGHT_CATEGORY_NEED = 0.1         # LOW weight
     WEIGHT_TENDENCY = 0.1              # LOW weight
     
     # Power-law exponent applied to scores before converting to probabilities.
     # Values > 1 concentrate selection probability on top-scored players.
-    SCORE_EXPONENT = 3.0
+    SCORE_EXPONENT = 4.0
     
     # Positional priority multipliers reflecting positional scarcity.
     # Applied to positional need scores so higher-priority positions are
@@ -62,7 +62,7 @@ class DraftSimulator:
         'SS': 1.20,
         '3B': 1.15,
         '2B': 1.10,
-        'C':  0.85,
+        'C':  0.55,
         'SP': 1.35,
         'RP': 1.00,
     }
