@@ -363,8 +363,14 @@ with tab1:
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
     
-    # Sort by Dollars (auction value) descending
-    df_show = df_show.sort_values(by='Dollars', ascending=False)
+    # Sort controls for the full player pool
+    sort_col1, sort_col2 = st.columns([2, 1])
+    with sort_col1:
+        sort_by = st.selectbox("Sort by", cols, index=cols.index('Dollars') if 'Dollars' in cols else 0, key="avail_sort_by")
+    with sort_col2:
+        sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="avail_sort_order")
+    
+    df_show = df_show.sort_values(by=sort_by, ascending=(sort_order == "Ascending"), na_position='last')
     
     # Pagination: 50 players per page
     players_per_page = 50
@@ -760,7 +766,14 @@ Team Alpha,4,hitting""", language="csv")
                 sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
             
-            sim_df_show = sim_df_show.sort_values(by='Dollars', ascending=False)
+            # Sort controls for the full player pool
+            sim_sort_col1, sim_sort_col2 = st.columns([2, 1])
+            with sim_sort_col1:
+                sim_sort_by = st.selectbox("Sort by", sim_cols, index=sim_cols.index('Dollars') if 'Dollars' in sim_cols else 0, key="sim_sort_by")
+            with sim_sort_col2:
+                sim_sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="sim_sort_order")
+            
+            sim_df_show = sim_df_show.sort_values(by=sim_sort_by, ascending=(sim_sort_order == "Ascending"), na_position='last')
             
             sim_players_per_page = 50
             sim_total_players = len(sim_df_show)
