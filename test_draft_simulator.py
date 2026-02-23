@@ -189,13 +189,14 @@ def test_score_recentering_restores_dynamic_range():
 
     rc_top = recentered[top_idx]
     rc_mid = recentered[mid_idx]
-    ratio_pow = (rc_top ** 3) / max(rc_mid ** 3, 1e-9)
+    exponent = sim.SCORE_EXPONENT
+    ratio_pow = (rc_top ** exponent) / max(rc_mid ** exponent, 1e-9)
 
     print(f"  Re-centered score top ($131): {rc_top:.2f}")
     print(f"  Re-centered score mid ($71):  {rc_mid:.2f}")
-    print(f"  Power-3 ratio: {ratio_pow:.2f}")
+    print(f"  Power-{exponent:.0f} ratio: {ratio_pow:.2f}")
 
-    # After re-centering + power-3, ratio should be at least 3
+    # After re-centering + power-law, ratio should be at least 3
     # (compared to <2 without re-centering for these values)
     if ratio_pow >= 3:
         print("  ✅ PASSED: Re-centering restores dynamic range")
