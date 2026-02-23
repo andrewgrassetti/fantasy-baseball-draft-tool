@@ -382,6 +382,12 @@ class DraftSimulator:
         
         # Convert scores to probabilities using power-law scaling
         scores_array = np.array([p['score'] for p in player_scores])
+        # Re-center scores so the lowest candidate starts near zero.
+        # Dollar normalization shifts all values positive, compressing the
+        # ratio between top and bottom candidates.  Subtracting the minimum
+        # restores the dynamic range so the power-law exponent can properly
+        # concentrate selection probability on top-valued players.
+        scores_array = scores_array - scores_array.min()
         # Add epsilon to ensure no zero probabilities
         scores_array = scores_array + self.EPSILON
         # Apply power-law exponent to concentrate probability on top-scored players
