@@ -23,7 +23,10 @@ candidates to players eligible for the remaining unfilled specific
 slots (C, 1B, 2B, 3B, SS, OF, SP, RP), ensuring a legal roster by
 the end of the draft.
 
-Positional priority multipliers reflect real-world positional scarcity:
+Positional priority multipliers reflect real-world positional scarcity and
+are applied as a direct multiplier on the overall composite score so that
+positions with low scarcity (e.g. catcher) are meaningfully de-prioritized
+even when their dollar values are high:
   Offense (highest to lowest): 1B, OF, SS, 3B, 2B, C
   Pitching (highest to lowest): SP, RP
 
@@ -84,7 +87,7 @@ class DraftSimulator:
         'SS': 1.20,
         '3B': 1.15,
         '2B': 1.10,
-        'C':  0.55,
+        'C':  0.35,
         'SP': 1.35,
         'RP': 1.00,
     }
@@ -550,6 +553,14 @@ class DraftSimulator:
         # already has players at this position to prevent over-drafting
         redundancy_multiplier = self._get_position_redundancy_multiplier(player_row, team_name, is_pitcher)
         score *= redundancy_multiplier
+        
+        # Factor 6: Positional scarcity multiplier — applied to total score so
+        # that positions with low real-world scarcity (e.g. catcher) are
+        # meaningfully de-prioritized even when their dollar values are high.
+        position = str(player_row['POS'])
+        if not pd.isna(position) and position != 'nan':
+            primary_pos = position.split('/')[0].strip()
+            score *= self.POSITION_PRIORITY.get(primary_pos, 1.0)
         
         return max(score, 0.0)  # Ensure non-negative
     

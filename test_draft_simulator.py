@@ -413,6 +413,113 @@ def test_position_diversity_in_shortlist():
         return False
 
 
+def test_catchers_not_overdrafted_in_early_rounds():
+    """At most 2 catchers should be drafted in the first 24 picks across
+    multiple simulations.
+
+    The positional downweighting (POSITION_PRIORITY applied as an overall
+    score multiplier) should prevent AI teams from drafting too many catchers
+    early, even when catchers have competitive dollar values.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Catchers not overdrafted in first 24 picks")
+    print("=" * 60)
+
+    # Create a realistic pool: some catchers with high dollar values
+    # mixed with other positions
+    positions = (['C'] * 6 + ['1B'] * 6 + ['OF'] * 12
+                 + ['SS'] * 5 + ['2B'] * 5 + ['3B'] * 5)
+    n_bat = len(positions)
+    # Catchers get competitive dollar values (not the very top, but close)
+    bat_dollars = (
+        [105, 90, 80, 70, 55, 40]          # 6 catchers
+        + [120, 100, 85, 65, 50, 35]        # 6 1B
+        + [130, 115, 110, 95, 88, 82, 75, 68, 60, 52, 45, 30]  # 12 OF
+        + [108, 92, 78, 58, 42]             # 5 SS
+        + [102, 87, 72, 53, 38]             # 5 2B
+        + [98, 83, 67, 48, 33]              # 5 3B
+    )
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(1000 + i) for i in range(n_bat)],
+        'Name': [f'Batter {i}' for i in range(n_bat)],
+        'POS': positions,
+        'Team': ['NYY'] * n_bat,
+        'AB': [500] * n_bat,
+        'R': [80] * n_bat,
+        'HR': [25] * n_bat,
+        'RBI': [75] * n_bat,
+        'SB': [10] * n_bat,
+        'OBP': [0.350] * n_bat,
+        'WAR': [3.0] * n_bat,
+        'Dollars': bat_dollars,
+    })
+
+    pitch_dollars = [125, 107, 93, 76, 62, 47, 34, 22]
+    n_pitch = len(pitch_dollars)
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(2000 + i) for i in range(n_pitch)],
+        'Name': [f'Pitcher {i}' for i in range(n_pitch)],
+        'POS': ['SP'] * n_pitch,
+        'Team': ['LAD'] * n_pitch,
+        'IP': [180] * n_pitch,
+        'SO': [200] * n_pitch,
+        'ERA': [3.50] * n_pitch,
+        'WHIP': [1.15] * n_pitch,
+        'WAR': [4.0] * n_pitch,
+        'SV': [0] * n_pitch,
+        'QS': [15] * n_pitch,
+        'Dollars': pitch_dollars,
+    })
+
+    team_names = ['User_Team'] + [f'AI_Team_{i}' for i in range(1, 12)]
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=2)  # 24 total picks
+
+    max_catchers_seen = 0
+    num_trials = 100
+
+    for trial in range(num_trials):
+        sim = DraftSimulator(engine, csv, user_team_name='User_Team',
+                             random_seed=trial)
+        while not sim.simulation_complete:
+            if sim.is_user_turn():
+                # User drafts best available non-catcher batter
+                avail = sim.engine.bat_df[
+                    (sim.engine.bat_df['Status'] == 'Available')
+                    & (sim.engine.bat_df['POS'] != 'C')
+                ]
+                if not avail.empty:
+                    top = avail.nlargest(1, 'Dollars').iloc[0]
+                    sim.make_user_pick(top['PlayerId'], is_pitcher=False)
+                else:
+                    avail_p = sim.engine.pitch_df[
+                        sim.engine.pitch_df['Status'] == 'Available']
+                    if not avail_p.empty:
+                        top = avail_p.nlargest(1, 'Dollars').iloc[0]
+                        sim.make_user_pick(top['PlayerId'], is_pitcher=True)
+                    else:
+                        break
+            else:
+                sim.simulate_next_pick()
+
+        catchers_drafted = sum(
+            1 for e in sim.pick_log if e['position'] == 'C'
+        )
+        max_catchers_seen = max(max_catchers_seen, catchers_drafted)
+
+    print(f"  Max catchers in first 24 picks across {num_trials} trials: {max_catchers_seen}")
+
+    # With strong positional downweighting, at most 2 catchers should be
+    # drafted in the first 24 picks (realistic: ~1 per 12-team round).
+    if max_catchers_seen <= 2:
+        print("  ✅ PASSED: Catchers are not overdrafted in early rounds")
+        return True
+    else:
+        print(f"  ❌ FAILED: {max_catchers_seen} catchers drafted (expected ≤ 2)")
+        return False
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -424,6 +531,7 @@ if __name__ == '__main__':
     t4 = test_value_ordering_within_position()
     t5 = test_empty_candidate_handling()
     t6 = test_position_diversity_in_shortlist()
+    t7 = test_catchers_not_overdrafted_in_early_rounds()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -434,8 +542,9 @@ if __name__ == '__main__':
     print(f"Test 4 (Value ordering within position): {'✅ PASSED' if t4 else '❌ FAILED'}")
     print(f"Test 5 (Empty candidate handling): {'✅ PASSED' if t5 else '❌ FAILED'}")
     print(f"Test 6 (Position diversity in shortlist): {'✅ PASSED' if t6 else '❌ FAILED'}")
+    print(f"Test 7 (Catchers not overdrafted): {'✅ PASSED' if t7 else '❌ FAILED'}")
 
-    if t1 and t2 and t3 and t4 and t5 and t6:
+    if t1 and t2 and t3 and t4 and t5 and t6 and t7:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
     else:
