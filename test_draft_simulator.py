@@ -206,6 +206,68 @@ def test_score_recentering_restores_dynamic_range():
         return False
 
 
+def test_value_ordering_within_position():
+    """The highest-dollar SP should be the first SP drafted in most simulations.
+
+    Without the per-type shortlisting, the probabilistic selection over the
+    full combined candidate pool allows lower-value SPs to be drafted before
+    higher-value ones.  With shortlisting (SHORTLIST_PER_TYPE), the top SP
+    should be picked first among pitchers at least 60% of the time over
+    many trials.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Value ordering within position (SP first-pick)")
+    print("=" * 60)
+
+    # 30 batters + 20 pitchers — enough for a 3-round, 12-team draft
+    bat_dollars = list(range(130, 0, -4))[:30]
+    pitch_dollars = list(range(111, 0, -5))[:20]
+
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['User_Team'] + [f'AI_Team_{i}' for i in range(1, 12)]
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=3)
+
+    top_sp_first = 0
+    num_trials = 200
+
+    for trial in range(num_trials):
+        sim = DraftSimulator(engine, csv, user_team_name='User_Team',
+                             random_seed=trial)
+        while not sim.simulation_complete:
+            if sim.is_user_turn():
+                avail_bat = sim.engine.bat_df[
+                    sim.engine.bat_df['Status'] == 'Available']
+                if not avail_bat.empty:
+                    top = avail_bat.nlargest(1, 'Dollars').iloc[0]
+                    sim.make_user_pick(top['PlayerId'], is_pitcher=False)
+                else:
+                    avail_p = sim.engine.pitch_df[
+                        sim.engine.pitch_df['Status'] == 'Available']
+                    if not avail_p.empty:
+                        top = avail_p.nlargest(1, 'Dollars').iloc[0]
+                        sim.make_user_pick(top['PlayerId'], is_pitcher=True)
+                    else:
+                        break
+            else:
+                sim.simulate_next_pick()
+
+        pitcher_picks = [e for e in sim.pick_log if e['is_pitcher']]
+        if pitcher_picks and pitcher_picks[0]['player_name'] == 'Pitcher 0':
+            top_sp_first += 1
+
+    pct = top_sp_first / num_trials * 100
+    print(f"  Top SP ($111) drafted first: {top_sp_first}/{num_trials} ({pct:.1f}%)")
+
+    if pct >= 60:
+        print("  ✅ PASSED: Highest-value SP is drafted first in most sims")
+        return True
+    else:
+        print("  ❌ FAILED: Highest-value SP not drafted first often enough")
+        return False
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -214,6 +276,7 @@ if __name__ == '__main__':
     t1 = test_high_value_player_dominates()
     t2 = test_normalized_dollars_preserved()
     t3 = test_score_recentering_restores_dynamic_range()
+    t4 = test_value_ordering_within_position()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -221,8 +284,9 @@ if __name__ == '__main__':
     print(f"Test 1 (High-value dominance): {'✅ PASSED' if t1 else '❌ FAILED'}")
     print(f"Test 2 (Normalized dollars preserved): {'✅ PASSED' if t2 else '❌ FAILED'}")
     print(f"Test 3 (Re-centering dynamic range): {'✅ PASSED' if t3 else '❌ FAILED'}")
+    print(f"Test 4 (Value ordering within position): {'✅ PASSED' if t4 else '❌ FAILED'}")
 
-    if t1 and t2 and t3:
+    if t1 and t2 and t3 and t4:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
     else:
