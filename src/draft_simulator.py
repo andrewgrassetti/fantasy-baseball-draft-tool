@@ -35,6 +35,13 @@ penalties because extra OF/1B often make good Util/bench players.
 Dollar values are expanded via a power function (DOLLAR_EXPANSION_EXPONENT)
 before weighting, increasing the gap between high- and low-value players.
 
+After scoring, the candidate pool is shortlisted to the top
+SHORTLIST_PER_TYPE players per position type (batters and pitchers
+separately).  This ensures that within each type the highest-valued
+players are always strongly preferred and prevents scenarios where
+multiple lower-value players at a position are drafted while a
+higher-value player at the same position remains on the board.
+
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
 """
@@ -101,6 +108,13 @@ class DraftSimulator:
     
     # Maximum number of top players (by Dollar value) to consider per pick
     TOP_N_PLAYERS = 50
+    
+    # Maximum number of top-scored candidates to shortlist per position type
+    # (batters and pitchers separately) before probabilistic selection.
+    # This ensures that within each position type, value ordering is respected
+    # and prevents lower-value players at a position from being drafted before
+    # higher-value ones.
+    SHORTLIST_PER_TYPE = 5
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
         """Initialize the draft simulator.
@@ -409,8 +423,29 @@ class DraftSimulator:
                 'dollars': row.get('Dollars', 0)
             })
         
+        # Shortlist: keep only the top SHORTLIST_PER_TYPE candidates from
+        # each position type (batters / pitchers) so that within each type
+        # the highest-valued players are always strongly preferred.  This
+        # prevents a low-value SP from being drafted while a higher-value
+        # SP sits on the board.
+        batter_candidates = [p for p in player_scores if not p['is_pitcher']]
+        pitcher_candidates = [p for p in player_scores if p['is_pitcher']]
+        batter_candidates.sort(key=lambda p: p['score'], reverse=True)
+        pitcher_candidates.sort(key=lambda p: p['score'], reverse=True)
+        shortlisted = (
+            batter_candidates[:self.SHORTLIST_PER_TYPE]
+            + pitcher_candidates[:self.SHORTLIST_PER_TYPE]
+        )
+        
+        if not shortlisted:
+            # No candidates available — skip this pick
+            self.current_pick_index += 1
+            if self.current_pick_index >= len(self.draft_order):
+                self.simulation_complete = True
+            return None
+        
         # Convert scores to probabilities using power-law scaling
-        scores_array = np.array([p['score'] for p in player_scores])
+        scores_array = np.array([p['score'] for p in shortlisted])
         # Re-center scores so the lowest candidate starts near zero.
         # Dollar normalization shifts all values positive, compressing the
         # ratio between top and bottom candidates.  Subtracting the minimum
@@ -424,8 +459,8 @@ class DraftSimulator:
         probabilities = scores_array / scores_array.sum()
         
         # Select player using weighted random choice
-        selected_idx = np.random.choice(len(player_scores), p=probabilities)
-        selected_player = player_scores[selected_idx]
+        selected_idx = np.random.choice(len(shortlisted), p=probabilities)
+        selected_player = shortlisted[selected_idx]
         
         # Process the pick
         self.engine.process_pick(
