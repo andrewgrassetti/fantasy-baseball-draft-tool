@@ -87,9 +87,9 @@ class DraftSimulator:
         'SS': 1.20,
         '3B': 1.15,
         '2B': 1.10,
-        'C':  0.35,
+        'C':  0.90,
         'SP': 1.35,
-        'RP': 1.00,
+        'RP': 1.10,
     }
     
     # Position redundancy multipliers applied to the composite score.
