@@ -42,6 +42,12 @@ players are always strongly preferred and prevents scenarios where
 multiple lower-value players at a position are drafted while a
 higher-value player at the same position remains on the board.
 
+Within each type, no single fielding position may contribute more than
+MAX_PER_POSITION_IN_SHORTLIST candidates to the shortlist.  This
+prevents a position with inflated dollar values (e.g. catcher) from
+monopolizing the shortlist and bypassing the positional weighting that
+is designed to de-prioritize it.
+
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
 """
@@ -115,6 +121,13 @@ class DraftSimulator:
     # and prevents lower-value players at a position from being drafted before
     # higher-value ones.
     SHORTLIST_PER_TYPE = 5
+    
+    # Maximum number of candidates from any single fielding position allowed
+    # in the shortlist.  This prevents a single position (e.g. catcher) from
+    # monopolizing the batter shortlist when its players happen to have the
+    # highest raw dollar values, which would negate the positional weighting
+    # designed to de-prioritize that position.
+    MAX_PER_POSITION_IN_SHORTLIST = 2
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
         """Initialize the draft simulator.
@@ -428,13 +441,19 @@ class DraftSimulator:
         # the highest-valued players are always strongly preferred.  This
         # prevents a low-value SP from being drafted while a higher-value
         # SP sits on the board.
+        #
+        # Within each type, no single fielding position may contribute more
+        # than MAX_PER_POSITION_IN_SHORTLIST candidates.  This ensures that
+        # a position with inflated dollar values (e.g. catcher) cannot
+        # monopolize the shortlist and bypass the positional weighting that
+        # is designed to de-prioritize it.
         batter_candidates = [p for p in player_scores if not p['is_pitcher']]
         pitcher_candidates = [p for p in player_scores if p['is_pitcher']]
         batter_candidates.sort(key=lambda p: p['score'], reverse=True)
         pitcher_candidates.sort(key=lambda p: p['score'], reverse=True)
         shortlisted = (
-            batter_candidates[:self.SHORTLIST_PER_TYPE]
-            + pitcher_candidates[:self.SHORTLIST_PER_TYPE]
+            self._position_diverse_shortlist(batter_candidates)
+            + self._position_diverse_shortlist(pitcher_candidates)
         )
         
         if not shortlisted:
@@ -669,6 +688,37 @@ class DraftSimulator:
             return False
         positions = [p.strip() for p in str(position_str).split('/')]
         return any(p in needed_positions for p in positions)
+    
+    def _position_diverse_shortlist(self, candidates: List[Dict]) -> List[Dict]:
+        """Build a shortlist of up to SHORTLIST_PER_TYPE candidates while
+        limiting any single fielding position to MAX_PER_POSITION_IN_SHORTLIST
+        entries.
+
+        Candidates must be pre-sorted by score (descending).  The method
+        iterates through the sorted list, accepting each candidate unless its
+        primary position has already reached the per-position cap.  This
+        guarantees that a position with inflated dollar values cannot
+        monopolize the shortlist.
+
+        Args:
+            candidates: Scored candidate dicts, sorted by score descending.
+                        Each dict must have a 'position' key.
+
+        Returns:
+            List of up to SHORTLIST_PER_TYPE candidates with position diversity.
+        """
+        shortlist: List[Dict] = []
+        position_counts: Dict[str, int] = {}
+        for candidate in candidates:
+            pos = candidate.get('position', '')
+            primary = pos.split('/')[0].strip() if pos and not pd.isna(pos) else 'Unknown'
+            count = position_counts.get(primary, 0)
+            if count < self.MAX_PER_POSITION_IN_SHORTLIST:
+                shortlist.append(candidate)
+                position_counts[primary] = count + 1
+                if len(shortlist) >= self.SHORTLIST_PER_TYPE:
+                    break
+        return shortlist
     
     def _get_position_redundancy_multiplier(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
         """Return a score multiplier (0-1) that penalizes drafting surplus players
