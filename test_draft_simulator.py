@@ -329,6 +329,90 @@ def test_empty_candidate_handling():
     return passed
 
 
+def test_position_diversity_in_shortlist():
+    """When all top batters share one position (e.g. catcher), the shortlist
+    should still include batters from other positions.
+
+    Without per-position capping, if the 5 highest-dollar batters are all
+    catchers, the batter shortlist would contain only catchers — forcing the
+    AI to pick a catcher or a pitcher and negating the strong positional
+    weighting that is supposed to de-prioritize catcher.
+
+    With MAX_PER_POSITION_IN_SHORTLIST the AI should draft a non-catcher
+    batter in a meaningful fraction of trials.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Position diversity in shortlist (catcher-dominated pool)")
+    print("=" * 60)
+
+    # 6 catchers slightly above the non-catchers in dollar value
+    bat_dollars = [120, 115, 110, 108, 105, 103,  # 6 catchers
+                   112, 107, 102, 97]               # OF, 1B, SS, 2B
+    bat_positions = (['C'] * 6
+                     + ['OF', '1B', 'SS', '2B'])
+    n_bat = len(bat_dollars)
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(1000 + i) for i in range(n_bat)],
+        'Name': [f'Batter {i}' for i in range(n_bat)],
+        'POS': bat_positions,
+        'Team': ['NYY'] * n_bat,
+        'AB': [500] * n_bat,
+        'R': [80] * n_bat,
+        'HR': [25] * n_bat,
+        'RBI': [75] * n_bat,
+        'SB': [10] * n_bat,
+        'OBP': [0.350] * n_bat,
+        'WAR': [3.0] * n_bat,
+        'Dollars': bat_dollars,
+    })
+
+    pitch_dollars = [60, 50, 40]
+    n_pitch = len(pitch_dollars)
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(2000 + i) for i in range(n_pitch)],
+        'Name': [f'Pitcher {i}' for i in range(n_pitch)],
+        'POS': ['SP'] * n_pitch,
+        'Team': ['LAD'] * n_pitch,
+        'IP': [180] * n_pitch,
+        'SO': [200] * n_pitch,
+        'ERA': [3.50] * n_pitch,
+        'WHIP': [1.15] * n_pitch,
+        'WAR': [4.0] * n_pitch,
+        'SV': [0] * n_pitch,
+        'QS': [15] * n_pitch,
+        'Dollars': pitch_dollars,
+    })
+
+    team_names = ['AI_Team_1', 'AI_Team_2']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+
+    csv = _make_draft_order_csv(team_names, num_rounds=1)
+
+    non_catcher_count = 0
+    num_trials = 200
+
+    for trial in range(num_trials):
+        sim = DraftSimulator(engine, csv, user_team_name='AI_Team_2',
+                             random_seed=trial)
+        result = sim.simulate_next_pick()
+        if result and result['position'] != 'C' and not result.get('is_pitcher', True):
+            # A non-catcher batter was selected
+            non_catcher_count += 1
+
+    pct = non_catcher_count / num_trials * 100
+    print(f"  Non-catcher batter picked first in {non_catcher_count}/{num_trials} trials ({pct:.1f}%)")
+
+    # With position diversity enforced, non-catcher batters should appear
+    # in at least 5% of trials (they are present in the shortlist)
+    if pct >= 5:
+        print("  ✅ PASSED: Shortlist includes non-catcher batters despite catcher-dominated pool")
+        return True
+    else:
+        print("  ❌ FAILED: Catchers monopolized the shortlist")
+        return False
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -339,6 +423,7 @@ if __name__ == '__main__':
     t3 = test_score_recentering_restores_dynamic_range()
     t4 = test_value_ordering_within_position()
     t5 = test_empty_candidate_handling()
+    t6 = test_position_diversity_in_shortlist()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -348,8 +433,9 @@ if __name__ == '__main__':
     print(f"Test 3 (Re-centering dynamic range): {'✅ PASSED' if t3 else '❌ FAILED'}")
     print(f"Test 4 (Value ordering within position): {'✅ PASSED' if t4 else '❌ FAILED'}")
     print(f"Test 5 (Empty candidate handling): {'✅ PASSED' if t5 else '❌ FAILED'}")
+    print(f"Test 6 (Position diversity in shortlist): {'✅ PASSED' if t6 else '❌ FAILED'}")
 
-    if t1 and t2 and t3 and t4 and t5:
+    if t1 and t2 and t3 and t4 and t5 and t6:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
     else:
