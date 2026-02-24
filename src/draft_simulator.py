@@ -432,12 +432,12 @@ class DraftSimulator:
         pitcher_candidates = [p for p in player_scores if p['is_pitcher']]
         batter_candidates.sort(key=lambda p: p['score'], reverse=True)
         pitcher_candidates.sort(key=lambda p: p['score'], reverse=True)
-        player_scores = (
+        shortlisted = (
             batter_candidates[:self.SHORTLIST_PER_TYPE]
             + pitcher_candidates[:self.SHORTLIST_PER_TYPE]
         )
         
-        if not player_scores:
+        if not shortlisted:
             # No candidates available — skip this pick
             self.current_pick_index += 1
             if self.current_pick_index >= len(self.draft_order):
@@ -445,7 +445,7 @@ class DraftSimulator:
             return None
         
         # Convert scores to probabilities using power-law scaling
-        scores_array = np.array([p['score'] for p in player_scores])
+        scores_array = np.array([p['score'] for p in shortlisted])
         # Re-center scores so the lowest candidate starts near zero.
         # Dollar normalization shifts all values positive, compressing the
         # ratio between top and bottom candidates.  Subtracting the minimum
@@ -459,8 +459,8 @@ class DraftSimulator:
         probabilities = scores_array / scores_array.sum()
         
         # Select player using weighted random choice
-        selected_idx = np.random.choice(len(player_scores), p=probabilities)
-        selected_player = player_scores[selected_idx]
+        selected_idx = np.random.choice(len(shortlisted), p=probabilities)
+        selected_player = shortlisted[selected_idx]
         
         # Process the pick
         self.engine.process_pick(
