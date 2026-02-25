@@ -58,6 +58,9 @@ to probabilities, concentrating selection probability on top-valued players.
 import pandas as pd
 import numpy as np
 import copy
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Optional
 from .models import Team, Player
 from .draft_engine import DraftEngine
@@ -132,7 +135,7 @@ class DraftSimulator:
     # designed to de-prioritize that position.
     MAX_PER_POSITION_IN_SHORTLIST = 2
     
-    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False):
+    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None):
         """Initialize the draft simulator.
         
         Args:
@@ -142,13 +145,22 @@ class DraftSimulator:
             random_seed: Optional random seed for reproducibility
             snapshot_mode: If True, skips user-team validation and never pauses
                            on user's turn (all picks are auto-simulated).
+            draft_order_df: Optional pre-parsed draft order DataFrame.  When
+                            provided, ``draft_order_csv`` parsing is skipped
+                            (saves repeated CSV parsing in Monte Carlo loops).
         """
         # Deep copy the engine to avoid mutating the main draft state
-        self.engine = self._deep_copy_engine(engine)
+        if snapshot_mode:
+            self.engine = self._snapshot_copy_engine(engine)
+        else:
+            self.engine = self._deep_copy_engine(engine)
         self.snapshot_mode = snapshot_mode
         
-        # Parse draft order
-        self.draft_order = self._parse_draft_order(draft_order_csv)
+        # Parse draft order (or reuse pre-parsed DataFrame)
+        if draft_order_df is not None:
+            self.draft_order = draft_order_df
+        else:
+            self.draft_order = self._parse_draft_order(draft_order_csv)
         self.user_team_name = user_team_name
         
         # Validate user team name exists in draft order (skipped in snapshot mode)
@@ -215,6 +227,38 @@ class DraftSimulator:
                 )
                 new_team.add_player(player_copy)
         
+        return new_engine
+    
+    def _snapshot_copy_engine(self, engine: DraftEngine) -> DraftEngine:
+        """Create a lightweight engine copy for snapshot (Monte Carlo) simulation.
+
+        Faster than ``_deep_copy_engine`` by skipping ``DraftEngine.__init__``
+        overhead and using shallow copies of Player objects (they are
+        effectively read-only during simulation — new players are only ever
+        appended, never mutated).
+
+        Args:
+            engine: Original DraftEngine instance (treated as read-only).
+
+        Returns:
+            Lightweight DraftEngine copy suitable for a single simulation run.
+        """
+        new_engine = object.__new__(DraftEngine)
+        # Copy DataFrames (Status/DraftedBy columns included — no reset needed)
+        new_engine.bat_df = engine.bat_df.copy()
+        new_engine.pitch_df = engine.pitch_df.copy()
+
+        # Shallow-copy teams: roster lists and mutable dicts are copied so that
+        # add_player() calls during simulation don't affect the original teams.
+        new_engine.teams = {}
+        for team_name, team in engine.teams.items():
+            new_team = object.__new__(Team)
+            new_team.owner_name = team.owner_name
+            new_team.roster = list(team.roster)  # new list, same Player refs
+            new_team.slots_filled = dict(team.slots_filled)
+            new_team.position_counts = dict(getattr(team, 'position_counts', {}))
+            new_engine.teams[team_name] = new_team
+
         return new_engine
     
     def _parse_draft_order(self, csv_content: str) -> pd.DataFrame:
@@ -771,14 +815,8 @@ class DraftSimulator:
                 best_multiplier = 1.0
                 continue
 
-            # Count rostered players who list this position
-            count = 0
-            for player in team.roster:
-                if player.position is None or (isinstance(player.position, float) and pd.isna(player.position)):
-                    continue
-                player_positions = [p.strip() for p in str(player.position).split('/')]
-                if pos in player_positions:
-                    count += 1
+            # Count rostered players who list this position (cache lookup)
+            count = team.position_counts.get(pos, 0)
 
             idx = min(count, len(redundancy_table) - 1)
             multiplier = redundancy_table[idx]
@@ -1004,22 +1042,26 @@ def run_monte_carlo_snapshot(
     current_pick_index: int,
     n_simulations: int = 200,
     progress_callback=None,
+    max_workers: int = None,
 ) -> dict:
     """Run N Monte Carlo simulations from the current draft state.
 
     The live DraftEngine is never mutated — each simulation operates on its
-    own deep copy.  Already-completed picks are fast-forwarded by setting
-    ``current_pick_index`` and marking drafted players as unavailable in the
-    simulation copy.
+    own lightweight copy.  Already-completed picks are fast-forwarded by
+    setting ``current_pick_index`` and marking drafted players as unavailable
+    in the simulation copy.
 
     Args:
-        engine: The live DraftEngine (read-only; deep-copied per simulation).
+        engine: The live DraftEngine (read-only; copied per simulation).
         draft_order_csv: CSV string for the draft order.
         current_pick_index: Pick index to start each simulation from (picks
             before this index are treated as already completed).
         n_simulations: Number of simulations to run (default 200).
         progress_callback: Optional ``callable(float)`` called after each
             simulation with the fraction completed ``[0, 1]``.
+        max_workers: Number of parallel worker threads.  Defaults to
+            ``min(4, n_simulations)``.  Pass 1 to run sequentially (useful
+            for reproducible results with fixed random seeds).
 
     Returns:
         Dict with keys:
@@ -1028,21 +1070,31 @@ def run_monte_carlo_snapshot(
         - ``n_simulations``: int
         - ``current_pick_index``: int
     """
+    if max_workers is None:
+        max_workers = min(4, n_simulations)
+
     # Pre-compute boolean masks for drafted players from the *original* engine
-    # so we can re-apply them to each simulation copy (DraftSimulator resets
-    # 'Drafted' → 'Available' in its deep copy, but we need them off the board).
+    # so we can re-apply them to each simulation copy (snapshot copy preserves
+    # all statuses, but drafted masks are re-applied for clarity/consistency).
     bat_drafted_mask = (engine.bat_df['Status'] == 'Drafted').values
     pitch_drafted_mask = (engine.pitch_df['Status'] == 'Drafted').values
 
-    all_standings = []
+    # Parse draft order CSV once and reuse across all simulations
+    _tmp = DraftSimulator.__new__(DraftSimulator)
+    draft_order_df = _tmp._parse_draft_order(draft_order_csv)
 
-    for i in range(n_simulations):
+    completed_count = 0
+    count_lock = threading.Lock()
+
+    def _run_single_sim(i: int) -> pd.DataFrame:
+        nonlocal completed_count
         sim = DraftSimulator(
             engine=engine,
             draft_order_csv=draft_order_csv,
             user_team_name="__SNAPSHOT__",  # sentinel — matches no real team
             random_seed=i,
             snapshot_mode=True,
+            draft_order_df=draft_order_df,
         )
 
         # Fast-forward past already-completed picks
@@ -1055,10 +1107,20 @@ def run_monte_carlo_snapshot(
         sim.simulate_until_user_or_complete()
 
         standings_df = sim.get_standings().set_index('Team')
-        all_standings.append(standings_df)
 
         if progress_callback is not None:
-            progress_callback((i + 1) / n_simulations)
+            with count_lock:
+                completed_count += 1
+                frac = completed_count / n_simulations
+            progress_callback(frac)
+
+        return standings_df
+
+    all_standings = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_run_single_sim, i) for i in range(n_simulations)]
+        for future in futures:
+            all_standings.append(future.result())
 
     # Aggregate across simulations
     values = np.stack([df.values.astype(float) for df in all_standings])
