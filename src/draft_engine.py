@@ -212,6 +212,12 @@ class DraftEngine:
         
         return False
 
+    def get_total_picks_made(self) -> int:
+        """Count total non-keeper picks made (Drafted status)."""
+        bat_drafted = (self.bat_df['Status'] == 'Drafted').sum()
+        pitch_drafted = (self.pitch_df['Status'] == 'Drafted').sum()
+        return int(bat_drafted + pitch_drafted)
+
     def get_standings(self):
         """Returns a DataFrame of the current 5x5 standings."""
         data = []

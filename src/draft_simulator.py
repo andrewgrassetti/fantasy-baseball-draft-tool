@@ -132,7 +132,7 @@ class DraftSimulator:
     # designed to de-prioritize that position.
     MAX_PER_POSITION_IN_SHORTLIST = 2
     
-    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None):
+    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False):
         """Initialize the draft simulator.
         
         Args:
@@ -140,18 +140,22 @@ class DraftSimulator:
             draft_order_csv: Path to CSV or CSV content as string
             user_team_name: Name of the user's team (must match CSV)
             random_seed: Optional random seed for reproducibility
+            snapshot_mode: If True, skips user-team validation and never pauses
+                           on user's turn (all picks are auto-simulated).
         """
         # Deep copy the engine to avoid mutating the main draft state
         self.engine = self._deep_copy_engine(engine)
+        self.snapshot_mode = snapshot_mode
         
         # Parse draft order
         self.draft_order = self._parse_draft_order(draft_order_csv)
         self.user_team_name = user_team_name
         
-        # Validate user team name exists in draft order
-        team_names_in_order = self.draft_order['player_name'].unique()
-        if user_team_name not in team_names_in_order:
-            raise ValueError(f"User team '{user_team_name}' not found in draft order. Available teams: {list(team_names_in_order)}")
+        # Validate user team name exists in draft order (skipped in snapshot mode)
+        if not snapshot_mode:
+            team_names_in_order = self.draft_order['player_name'].unique()
+            if user_team_name not in team_names_in_order:
+                raise ValueError(f"User team '{user_team_name}' not found in draft order. Available teams: {list(team_names_in_order)}")
         
         # Initialize simulation state
         self.current_pick_index = 0
@@ -347,8 +351,8 @@ class DraftSimulator:
         
         pick_info = self.get_current_pick_info()
         
-        # If it's user's turn, pause
-        if pick_info['is_user_pick']:
+        # If it's user's turn, pause (unless running in snapshot mode)
+        if pick_info['is_user_pick'] and not self.snapshot_mode:
             self.is_paused = True
             return None
         
@@ -992,3 +996,82 @@ class DraftSimulator:
             DataFrame with team roster
         """
         return self.engine.get_team_roster_df(team_name)
+
+
+def run_monte_carlo_snapshot(
+    engine: DraftEngine,
+    draft_order_csv: str,
+    current_pick_index: int,
+    n_simulations: int = 200,
+    progress_callback=None,
+) -> dict:
+    """Run N Monte Carlo simulations from the current draft state.
+
+    The live DraftEngine is never mutated — each simulation operates on its
+    own deep copy.  Already-completed picks are fast-forwarded by setting
+    ``current_pick_index`` and marking drafted players as unavailable in the
+    simulation copy.
+
+    Args:
+        engine: The live DraftEngine (read-only; deep-copied per simulation).
+        draft_order_csv: CSV string for the draft order.
+        current_pick_index: Pick index to start each simulation from (picks
+            before this index are treated as already completed).
+        n_simulations: Number of simulations to run (default 200).
+        progress_callback: Optional ``callable(float)`` called after each
+            simulation with the fraction completed ``[0, 1]``.
+
+    Returns:
+        Dict with keys:
+        - ``mean_standings``: DataFrame (teams × 10 categories), mean values.
+        - ``std_standings``: DataFrame (teams × 10 categories), std values.
+        - ``n_simulations``: int
+        - ``current_pick_index``: int
+    """
+    # Pre-compute boolean masks for drafted players from the *original* engine
+    # so we can re-apply them to each simulation copy (DraftSimulator resets
+    # 'Drafted' → 'Available' in its deep copy, but we need them off the board).
+    bat_drafted_mask = (engine.bat_df['Status'] == 'Drafted').values
+    pitch_drafted_mask = (engine.pitch_df['Status'] == 'Drafted').values
+
+    all_standings = []
+
+    for i in range(n_simulations):
+        sim = DraftSimulator(
+            engine=engine,
+            draft_order_csv=draft_order_csv,
+            user_team_name="__SNAPSHOT__",  # sentinel — matches no real team
+            random_seed=i,
+            snapshot_mode=True,
+        )
+
+        # Fast-forward past already-completed picks
+        sim.current_pick_index = current_pick_index
+
+        # Keep already-drafted players off the board so they are not re-picked
+        sim.engine.bat_df.loc[bat_drafted_mask, 'Status'] = 'Drafted'
+        sim.engine.pitch_df.loc[pitch_drafted_mask, 'Status'] = 'Drafted'
+
+        sim.simulate_until_user_or_complete()
+
+        standings_df = sim.get_standings().set_index('Team')
+        all_standings.append(standings_df)
+
+        if progress_callback is not None:
+            progress_callback((i + 1) / n_simulations)
+
+    # Aggregate across simulations
+    values = np.stack([df.values.astype(float) for df in all_standings])
+    mean_vals = values.mean(axis=0)
+    std_vals = values.std(axis=0)
+
+    ref = all_standings[0]
+    mean_standings = pd.DataFrame(mean_vals, index=ref.index, columns=ref.columns)
+    std_standings = pd.DataFrame(std_vals, index=ref.index, columns=ref.columns)
+
+    return {
+        'mean_standings': mean_standings,
+        'std_standings': std_standings,
+        'n_simulations': n_simulations,
+        'current_pick_index': current_pick_index,
+    }
