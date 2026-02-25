@@ -1,9 +1,11 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
+import time
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
 from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
-from src.draft_simulator import DraftSimulator
+from src.draft_simulator import DraftSimulator, run_monte_carlo_snapshot
 
 # Page Config (Wide layout is better for dashboards)
 st.set_page_config(page_title="Fantasy Draft Tool", layout="wide")
@@ -393,10 +395,175 @@ with tab1:
     else:
         st.info("No available players found.")
 
+    # ==========================================
+    # SNAPSHOT PROJECTIONS SECTION (tab1)
+    # ==========================================
+    st.divider()
+    st.subheader("📸 Draft Snapshot Projections")
+    st.markdown(
+        "Run Monte Carlo simulations from the **current draft state** to project "
+        "end-of-draft 5×5 category totals for all teams. "
+        "The live draft is never modified — all simulations use isolated copies."
+    )
 
-# ==========================================
-# TAB 2: MARKET ANALYSIS (THE PLOTS)
-# ==========================================
+    # Draft order CSV upload (shared with Simulator tab via session state)
+    snap_csv_col, snap_info_col = st.columns([2, 1])
+    with snap_csv_col:
+        snap_uploaded = st.file_uploader(
+            "Upload Draft Order CSV (required)",
+            type=['csv'],
+            key="snapshot_csv_uploader",
+            help="Same CSV format used in the Simulator tab: player_name, pick_number, tendency",
+        )
+        if snap_uploaded is not None:
+            st.session_state.draft_csv = snap_uploaded.getvalue().decode('utf-8')
+            st.success("✅ Draft order CSV loaded.")
+
+    with snap_info_col:
+        st.markdown("**CSV Format:**")
+        st.code("player_name,pick_number,tendency\nTeam A,1,hitting\nTeam B,2,pitching", language="csv")
+
+    if 'draft_csv' in st.session_state and st.session_state.draft_csv:
+        snap_col1, snap_col2, snap_col3 = st.columns([1, 1, 1])
+
+        with snap_col1:
+            n_sims = st.number_input(
+                "Simulations",
+                min_value=10,
+                max_value=1000,
+                value=200,
+                step=10,
+                key="snap_n_sims",
+                help="Number of Monte Carlo simulations to run (100–1000 recommended).",
+            )
+
+        with snap_col2:
+            auto_pick_index = engine.get_total_picks_made()
+            snap_pick_index = st.number_input(
+                "Current Pick #",
+                min_value=0,
+                max_value=10000,
+                value=auto_pick_index,
+                step=1,
+                key="snap_pick_index",
+                help=f"Auto-detected from drafted players ({auto_pick_index}). Override if needed.",
+            )
+
+        with snap_col3:
+            st.write("")
+            st.write("")
+            run_snapshot = st.button("🔮 Run Snapshot", type="primary", key="run_snapshot_btn")
+
+        if run_snapshot:
+            snap_progress = st.progress(0.0, text="Running simulations…")
+            snap_start = time.time()
+
+            try:
+                def _snap_cb(frac):
+                    snap_progress.progress(frac, text=f"Running simulations… {int(frac * n_sims)}/{int(n_sims)}")
+
+                snapshot_results = run_monte_carlo_snapshot(
+                    engine=engine,
+                    draft_order_csv=st.session_state.draft_csv,
+                    current_pick_index=int(snap_pick_index),
+                    n_simulations=int(n_sims),
+                    progress_callback=_snap_cb,
+                )
+                snap_elapsed = time.time() - snap_start
+                st.session_state.snapshot_results = snapshot_results
+                st.session_state.snapshot_elapsed = snap_elapsed
+                snap_progress.progress(1.0, text="Done!")
+            except Exception as exc:
+                snap_progress.empty()
+                st.error(f"❌ Snapshot failed: {exc}")
+
+        # Display results if available
+        if 'snapshot_results' in st.session_state and st.session_state.snapshot_results:
+            snap_res = st.session_state.snapshot_results
+            mean_df = snap_res['mean_standings']
+            std_df = snap_res['std_standings']
+            elapsed = st.session_state.get('snapshot_elapsed', 0)
+
+            st.caption(
+                f"⏱️ Runtime: {elapsed:.1f}s  |  "
+                f"{snap_res['n_simulations']} simulations  |  "
+                f"Starting from pick #{snap_res['current_pick_index']}"
+            )
+
+            # Build heatmap
+            teams = mean_df.index.tolist()
+            categories = mean_df.columns.tolist()
+            n_teams = len(teams)
+            lower_is_better = {'ERA', 'WHIP'}
+
+            import numpy as np
+            norm_ranks = {}
+            for cat in categories:
+                vals = mean_df[cat].values.astype(float)
+                ranks = np.argsort(np.argsort(vals))  # 0=lowest value
+                if cat in lower_is_better:
+                    norm_ranks[cat] = (n_teams - 1 - ranks) / max(n_teams - 1, 1)
+                else:
+                    norm_ranks[cat] = ranks / max(n_teams - 1, 1)
+
+            z_values = [[float(norm_ranks[cat][ti]) for cat in categories] for ti, _ in enumerate(teams)]
+
+            cell_text = []
+            for team in teams:
+                row = []
+                for cat in categories:
+                    mv = float(mean_df.loc[team, cat])
+                    sv = float(std_df.loc[team, cat])
+                    if cat in {'OBP', 'ERA', 'WHIP'}:
+                        row.append(f"{mv:.3f}<br>±{sv:.3f}")
+                    else:
+                        row.append(f"{mv:.0f}<br>±{sv:.0f}")
+                cell_text.append(row)
+
+            hover_text = []
+            for ti, team in enumerate(teams):
+                row = []
+                for cat in categories:
+                    mv = float(mean_df.loc[team, cat])
+                    sv = float(std_df.loc[team, cat])
+                    rk = int(round((1 - norm_ranks[cat][ti]) * (n_teams - 1))) + 1
+                    row.append(
+                        f"<b>{team}</b><br>Category: {cat}<br>"
+                        f"Projected: {mv:.2f}<br>Std Dev: {sv:.2f}<br>Rank: {rk}/{n_teams}"
+                    )
+                hover_text.append(row)
+
+            snap_fig = go.Figure(data=go.Heatmap(
+                z=z_values,
+                x=categories,
+                y=teams,
+                colorscale='RdYlGn',
+                zmin=0.0,
+                zmax=1.0,
+                text=cell_text,
+                texttemplate='%{text}',
+                hovertext=hover_text,
+                hovertemplate='%{hovertext}<extra></extra>',
+                showscale=True,
+                colorbar=dict(
+                    title='Rank',
+                    tickvals=[0, 0.5, 1],
+                    ticktext=['Last', 'Mid', '1st'],
+                ),
+            ))
+            snap_fig.update_layout(
+                title='Projected End-of-Draft Standings — Monte Carlo Snapshot',
+                xaxis_title='Category',
+                yaxis_title='Team',
+                height=max(400, 35 * n_teams + 120),
+                template='plotly_white',
+                margin=dict(l=120, r=40, t=60, b=40),
+            )
+            st.plotly_chart(snap_fig, use_container_width=True)
+    else:
+        st.info("Upload a draft order CSV above to enable the snapshot feature.")
+
+
 with tab2:
     st.header("Player Value Visualization")
     
