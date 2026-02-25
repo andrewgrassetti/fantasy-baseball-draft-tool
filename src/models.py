@@ -32,10 +32,19 @@ class Team:
     def __post_init__(self):
         # Track filled slots dynamically
         self.slots_filled = {k: 0 for k in self.SLOT_LIMITS}
+        # Position count cache: maps position string -> count of rostered players
+        # eligible at that position.  Updated incrementally in add_player/remove_player.
+        self.position_counts: Dict[str, int] = {}
 
     def add_player(self, player: Player, is_keeper=False):
         """Adds a player and assigns them to the best available slot."""
         self.roster.append(player)
+
+        # Update position count cache
+        if not (pd.isna(player.position) or player.position is None):
+            for p in str(player.position).split('/'):
+                p = p.strip()
+                self.position_counts[p] = self.position_counts.get(p, 0) + 1
         
         # --- SLOT ASSIGNMENT LOGIC ---
         # 1. Try Primary Position
@@ -115,6 +124,7 @@ class Team:
         
         # Rebuild slots_filled from scratch to ensure accuracy
         self.slots_filled = {k: 0 for k in self.SLOT_LIMITS}
+        self.position_counts = {}
         
         # Re-add all remaining players to recalculate slot assignments
         remaining_players = self.roster.copy()
