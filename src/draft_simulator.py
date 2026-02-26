@@ -893,7 +893,8 @@ class DraftSimulator:
                 priority_map[pos_str] = 1.0
 
         # --- Vectorized market-value scores ---
-        dollars = np.maximum(df['Dollars'].values.astype(float), 0.0)
+        dollars = np.nan_to_num(df['Dollars'].values.astype(float), nan=0.0)
+        np.maximum(dollars, 0.0, out=dollars)
         scores = np.power(dollars, self.DOLLAR_EXPANSION_EXPONENT) * self.WEIGHT_MARKET_VALUE
 
         # --- Tendency score (constant for all candidates of same type) ---

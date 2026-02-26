@@ -186,9 +186,15 @@ class DraftEngine:
 
         if pid_map is not None and status_col is not None:
             # Fast O(1) path with pre-built index
-            idx = pid_map[player_id]
-            df.iat[idx, status_col] = 'Drafted'
-            row = df.iloc[idx]
+            idx = pid_map.get(player_id)
+            if idx is not None:
+                df.iat[idx, status_col] = 'Drafted'
+                row = df.iloc[idx]
+            else:
+                # player_id not in map — fall back to mask
+                mask = df['PlayerId'] == player_id
+                df.loc[mask, 'Status'] = 'Drafted'
+                row = df.loc[mask].iloc[0]
         else:
             # Fallback: standard mask-based lookup
             mask = df['PlayerId'] == player_id
