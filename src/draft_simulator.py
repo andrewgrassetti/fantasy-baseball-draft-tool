@@ -75,7 +75,7 @@ class DraftSimulator:
     WEIGHT_MARKET_VALUE = 35.0         # DOMINANT weight - dollar value is king
     WEIGHT_POSITIONAL_NEED = 0.5       # SECONDARY weight - distant second
     WEIGHT_CATEGORY_NEED = 0.1         # LOW weight
-    WEIGHT_TENDENCY = 0.1              # LOW weight
+    WEIGHT_TENDENCY = 0.05              # LOW weight
     
     # Power-law exponent applied to scores before converting to probabilities.
     # Values > 1 concentrate selection probability on top-scored players.
@@ -88,11 +88,11 @@ class DraftSimulator:
     # Pitching (high to low): SP, RP
     POSITION_PRIORITY = {
         '1B': 1.30,
-        'OF': 1.25,
+        'OF': 1.30,
         'SS': 1.25,
         '3B': 1.25,
-        '2B': 1.15,
-        'C':  1.00,
+        '2B': 1.25,
+        'C':  1.05,
         'SP': 1.25,
         'RP': 1.10,
     }
@@ -103,7 +103,7 @@ class DraftSimulator:
     # Catcher is most aggressively penalized; OF and 1B are least penalized
     # because they are more likely to provide Util/bench value.
     POSITION_REDUNDANCY = {
-        'C':  [1.0, 0.08, 0.01],              # 1 C slot; 2nd C is rare, 3rd almost never
+        'C':  [1.0, 0.04, 0.01],              # 1 C slot; 2nd C is rare, 3rd almost never
         'SS': [1.0, 0.35, 0.08],              # 1 SS slot
         '2B': [1.0, 0.35, 0.08],              # 1 2B slot
         '3B': [1.0, 0.35, 0.08],              # 1 3B slot
