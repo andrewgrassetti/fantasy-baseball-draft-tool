@@ -424,7 +424,7 @@ with tab1:
         st.code("player_name,pick_number,tendency\nTeam A,1,hitting\nTeam B,2,pitching", language="csv")
 
     if 'draft_csv' in st.session_state and st.session_state.draft_csv:
-        snap_col1, snap_col2, snap_col3 = st.columns([1, 1, 1])
+        snap_col1, snap_col2 = st.columns([1, 1])
 
         with snap_col1:
             n_sims = st.number_input(
@@ -438,21 +438,12 @@ with tab1:
             )
 
         with snap_col2:
-            auto_pick_index = engine.get_total_picks_made()
-            snap_pick_index = st.number_input(
-                "Current Pick #",
-                min_value=0,
-                max_value=10000,
-                value=auto_pick_index,
-                step=1,
-                key="snap_pick_index",
-                help=f"Auto-detected from drafted players ({auto_pick_index}). Override if needed.",
-            )
-
-        with snap_col3:
             st.write("")
             st.write("")
             run_snapshot = st.button("🔮 Run Snapshot", type="primary", key="run_snapshot_btn")
+
+        auto_pick_index = engine.get_total_picks_made()
+        st.caption(f"📍 Auto-detected draft position: {auto_pick_index} picks made")
 
         if run_snapshot:
             snap_progress = st.progress(0.0, text="Running simulations…")
@@ -465,7 +456,6 @@ with tab1:
                 snapshot_results = run_monte_carlo_snapshot(
                     engine=engine,
                     draft_order_csv=st.session_state.draft_csv,
-                    current_pick_index=int(snap_pick_index),
                     n_simulations=int(n_sims),
                     progress_callback=_snap_cb,
                 )
