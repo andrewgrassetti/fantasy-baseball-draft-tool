@@ -59,7 +59,6 @@ import pandas as pd
 import numpy as np
 import copy
 import os
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Optional
 from .models import Team, Player
@@ -1083,11 +1082,7 @@ def run_monte_carlo_snapshot(
     _tmp = DraftSimulator.__new__(DraftSimulator)
     draft_order_df = _tmp._parse_draft_order(draft_order_csv)
 
-    completed_count = 0
-    count_lock = threading.Lock()
-
     def _run_single_sim(i: int) -> pd.DataFrame:
-        nonlocal completed_count
         sim = DraftSimulator(
             engine=engine,
             draft_order_csv=draft_order_csv,
@@ -1106,21 +1101,15 @@ def run_monte_carlo_snapshot(
 
         sim.simulate_until_user_or_complete()
 
-        standings_df = sim.get_standings().set_index('Team')
-
-        if progress_callback is not None:
-            with count_lock:
-                completed_count += 1
-                frac = completed_count / n_simulations
-            progress_callback(frac)
-
-        return standings_df
+        return sim.get_standings().set_index('Team')
 
     all_standings = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(_run_single_sim, i) for i in range(n_simulations)]
-        for future in futures:
+        for i, future in enumerate(futures, 1):
             all_standings.append(future.result())
+            if progress_callback is not None:
+                progress_callback(i / n_simulations)
 
     # Aggregate across simulations
     values = np.stack([df.values.astype(float) for df in all_standings])
