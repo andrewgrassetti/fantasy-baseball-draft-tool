@@ -89,11 +89,11 @@ class DraftSimulator:
     POSITION_PRIORITY = {
         '1B': 1.30,
         'OF': 1.25,
-        'SS': 1.20,
-        '3B': 1.20,
+        'SS': 1.25,
+        '3B': 1.25,
         '2B': 1.15,
         'C':  1.00,
-        'SP': 1.30,
+        'SP': 1.25,
         'RP': 1.10,
     }
     
