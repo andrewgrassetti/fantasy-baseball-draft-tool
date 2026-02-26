@@ -55,6 +55,7 @@ A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
 """
 
+import logging
 import pandas as pd
 import numpy as np
 import copy
@@ -63,6 +64,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Optional
 from .models import Team, Player
 from .draft_engine import DraftEngine
+
+logger = logging.getLogger(__name__)
 
 
 class DraftSimulator:
@@ -1131,9 +1134,11 @@ def run_monte_carlo_snapshot(
             sim.simulate_until_user_or_complete()
 
             return sim.get_standings().set_index('Team')
-        except Exception:
-            # If a single simulation fails, return the current standings from a
-            # fresh snapshot copy so the aggregation still has the right shape.
+        except Exception as exc:
+            # If a single simulation fails, log the error and return the
+            # current standings from a fresh snapshot copy so the
+            # aggregation still has the right shape.
+            logger.warning("Snapshot simulation %d failed: %s", i, exc)
             fallback = DraftSimulator(
                 engine=engine,
                 draft_order_csv=draft_order_csv,
