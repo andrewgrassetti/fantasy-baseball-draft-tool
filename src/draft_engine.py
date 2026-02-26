@@ -161,6 +161,53 @@ class DraftEngine:
         
         self.teams[team_name].add_player(new_player)
 
+    # Stats keys needed for incremental live_totals in Team.add_player
+    _BAT_STAT_KEYS = ('R', 'HR', 'RBI', 'SB', 'AB', 'OBP')
+    _PITCH_STAT_KEYS = ('SO', 'SV', 'QS', 'IP', 'ERA', 'WHIP')
+
+    def process_pick_fast(self, player_id, team_name, is_pitcher):
+        """Lightweight process_pick for snapshot simulations.
+
+        Skips DraftedBy update and avoids full row.to_dict(); only extracts
+        the stats needed for Team.add_player's incremental totals cache.
+        Uses pre-built index maps (set by _snapshot_copy_engine) for O(1)
+        player lookups when available.
+        """
+        if is_pitcher:
+            df = self.pitch_df
+            stat_keys = self._PITCH_STAT_KEYS
+            pid_map = getattr(self, '_pitch_pid_to_idx', None)
+            status_col = getattr(self, '_pitch_status_col', None)
+        else:
+            df = self.bat_df
+            stat_keys = self._BAT_STAT_KEYS
+            pid_map = getattr(self, '_bat_pid_to_idx', None)
+            status_col = getattr(self, '_bat_status_col', None)
+
+        if pid_map is not None and status_col is not None:
+            # Fast O(1) path with pre-built index
+            idx = pid_map[player_id]
+            df.iat[idx, status_col] = 'Drafted'
+            row = df.iloc[idx]
+        else:
+            # Fallback: standard mask-based lookup
+            mask = df['PlayerId'] == player_id
+            df.loc[mask, 'Status'] = 'Drafted'
+            row = df.loc[mask].iloc[0]
+
+        stats = {k: row[k] for k in stat_keys if k in row.index}
+
+        new_player = Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row.get('Team', ''),
+            dollars=row.get('Dollars', 0),
+            stats=stats,
+            is_pitcher=is_pitcher
+        )
+        self.teams[team_name].add_player(new_player)
+
     def undo_pick(self, player_id: str) -> bool:
         """Undoes a draft pick by reverting the player to Available status.
         

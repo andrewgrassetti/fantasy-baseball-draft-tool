@@ -35,6 +35,13 @@ class Team:
         # Position count cache: maps position string -> count of rostered players
         # eligible at that position.  Updated incrementally in add_player/remove_player.
         self.position_counts: Dict[str, int] = {}
+        # Incremental totals cache for live_totals (avoids re-iterating roster)
+        self._incr = {'R': 0, 'HR': 0, 'RBI': 0, 'SB': 0, 'K': 0, 'SV': 0, 'QS': 0}
+        self._total_ab = 0
+        self._total_on_base = 0.0
+        self._total_ip = 0.0
+        self._total_er = 0.0
+        self._total_wh = 0.0
 
     def add_player(self, player: Player, is_keeper=False):
         """Adds a player and assigns them to the best available slot."""
@@ -45,7 +52,31 @@ class Team:
             for p in str(player.position).split('/'):
                 p = p.strip()
                 self.position_counts[p] = self.position_counts.get(p, 0) + 1
-        
+
+        # Update incremental totals
+        s = player.stats
+        if not player.is_pitcher:
+            self._incr['R'] += s.get('R', 0)
+            self._incr['HR'] += s.get('HR', 0)
+            self._incr['RBI'] += s.get('RBI', 0)
+            self._incr['SB'] += s.get('SB', 0)
+            ab = s.get('AB', 0)
+            obp = s.get('OBP', 0)
+            if ab > 0:
+                self._total_ab += ab
+                self._total_on_base += obp * ab
+        else:
+            self._incr['K'] += s.get('SO', 0)
+            self._incr['SV'] += s.get('SV', 0)
+            self._incr['QS'] += s.get('QS', 0)
+            ip = s.get('IP', 0)
+            era = s.get('ERA', 0)
+            whip = s.get('WHIP', 0)
+            if ip > 0:
+                self._total_ip += ip
+                self._total_er += (era * ip) / 9
+                self._total_wh += whip * ip
+
         # --- SLOT ASSIGNMENT LOGIC ---
         # 1. Try Primary Position
         # Handle NaN/None positions
@@ -122,9 +153,15 @@ class Team:
         # Remove the player from the roster
         self.roster.remove(player_to_remove)
         
-        # Rebuild slots_filled from scratch to ensure accuracy
+        # Rebuild all caches from scratch to ensure accuracy
         self.slots_filled = {k: 0 for k in self.SLOT_LIMITS}
         self.position_counts = {}
+        self._incr = {'R': 0, 'HR': 0, 'RBI': 0, 'SB': 0, 'K': 0, 'SV': 0, 'QS': 0}
+        self._total_ab = 0
+        self._total_on_base = 0.0
+        self._total_ip = 0.0
+        self._total_er = 0.0
+        self._total_wh = 0.0
         
         # Re-add all remaining players to recalculate slot assignments
         remaining_players = self.roster.copy()
@@ -137,33 +174,18 @@ class Team:
 
     @property
     def live_totals(self) -> Dict[str, float]:
-        """Calculates the 5x5 category totals."""
-        # ... (This method remains the same as previous step) ...
-        # Copy the previous `live_totals` logic here!
+        """Returns the 5x5 category totals from incremental cache."""
         totals = {
-            'R': 0, 'HR': 0, 'RBI': 0, 'SB': 0, 'OBP': 0.000,
-            'K': 0, 'SV': 0, 'QS': 0, 'ERA': 0.00, 'WHIP': 0.00
+            'R': self._incr['R'], 'HR': self._incr['HR'],
+            'RBI': self._incr['RBI'], 'SB': self._incr['SB'], 'OBP': 0.000,
+            'K': self._incr['K'], 'SV': self._incr['SV'],
+            'QS': self._incr['QS'], 'ERA': 0.00, 'WHIP': 0.00
         }
-        
-        total_ab = 0; total_on_base = 0
-        total_ip = 0.0; total_er = 0.0; total_wh = 0.0
 
-        for p in self.roster:
-            s = p.stats
-            if not p.is_pitcher:
-                totals['R'] += s.get('R', 0); totals['HR'] += s.get('HR', 0)
-                totals['RBI'] += s.get('RBI', 0); totals['SB'] += s.get('SB', 0)
-                ab = s.get('AB', 0); obp = s.get('OBP', 0)
-                if ab > 0: total_ab += ab; total_on_base += (obp * ab)
-            else:
-                totals['K'] += s.get('SO', 0); totals['SV'] += s.get('SV', 0)
-                totals['QS'] += s.get('QS', 0)
-                ip = s.get('IP', 0); era = s.get('ERA', 0); whip = s.get('WHIP', 0)
-                if ip > 0: total_ip += ip; total_er += (era * ip) / 9; total_wh += (whip * ip)
-
-        if total_ab > 0: totals['OBP'] = round(total_on_base / total_ab, 3)
-        if total_ip > 0:
-            totals['ERA'] = round((total_er * 9) / total_ip, 2)
-            totals['WHIP'] = round(total_wh / total_ip, 2)
+        if self._total_ab > 0:
+            totals['OBP'] = round(self._total_on_base / self._total_ab, 3)
+        if self._total_ip > 0:
+            totals['ERA'] = round((self._total_er * 9) / self._total_ip, 2)
+            totals['WHIP'] = round(self._total_wh / self._total_ip, 2)
 
         return totals
