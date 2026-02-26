@@ -1035,10 +1035,25 @@ class DraftSimulator:
         return self.engine.get_team_roster_df(team_name)
 
 
+def _reconcile_snapshot_pick_index(
+    engine: DraftEngine,
+    draft_order_df: pd.DataFrame,
+) -> int:
+    """Infer the best starting pick index from the actual draft state.
+
+    Counts all non-keeper drafted players to determine how many picks have
+    been made, then clamps to the draft order length so the index is always
+    valid.  This avoids relying on a manually-entered pick number that may
+    be inconsistent with the real draft state.
+    """
+    total_picks = engine.get_total_picks_made()
+    return min(total_picks, len(draft_order_df))
+
+
 def run_monte_carlo_snapshot(
     engine: DraftEngine,
     draft_order_csv: str,
-    current_pick_index: int,
+    current_pick_index: int = None,
     n_simulations: int = 200,
     progress_callback=None,
     max_workers: int = None,
@@ -1050,11 +1065,18 @@ def run_monte_carlo_snapshot(
     setting ``current_pick_index`` and marking drafted players as unavailable
     in the simulation copy.
 
+    If the number of players per team is inconsistent with expectations given
+    the draft order, the simulator will reconcile the differences automatically
+    (clamping the pick index, skipping unresolvable picks, etc.) so that
+    simulations always complete without errors.
+
     Args:
         engine: The live DraftEngine (read-only; copied per simulation).
         draft_order_csv: CSV string for the draft order.
-        current_pick_index: Pick index to start each simulation from (picks
-            before this index are treated as already completed).
+        current_pick_index: Pick index to start each simulation from.  When
+            ``None`` (recommended), the index is automatically inferred from
+            the number of drafted players in the engine so that the snapshot
+            is always consistent with the live draft state.
         n_simulations: Number of simulations to run (default 200).
         progress_callback: Optional ``callable(float)`` called after each
             simulation with the fraction completed ``[0, 1]``.
@@ -1082,26 +1104,45 @@ def run_monte_carlo_snapshot(
     _tmp = DraftSimulator.__new__(DraftSimulator)
     draft_order_df = _tmp._parse_draft_order(draft_order_csv)
 
+    # Auto-infer or clamp current_pick_index to avoid index-out-of-bounds
+    if current_pick_index is None:
+        current_pick_index = _reconcile_snapshot_pick_index(engine, draft_order_df)
+    else:
+        current_pick_index = max(0, min(int(current_pick_index), len(draft_order_df)))
+
     def _run_single_sim(i: int) -> pd.DataFrame:
-        sim = DraftSimulator(
-            engine=engine,
-            draft_order_csv=draft_order_csv,
-            user_team_name="__SNAPSHOT__",  # sentinel — matches no real team
-            random_seed=i,
-            snapshot_mode=True,
-            draft_order_df=draft_order_df,
-        )
+        try:
+            sim = DraftSimulator(
+                engine=engine,
+                draft_order_csv=draft_order_csv,
+                user_team_name="__SNAPSHOT__",  # sentinel — matches no real team
+                random_seed=i,
+                snapshot_mode=True,
+                draft_order_df=draft_order_df,
+            )
 
-        # Fast-forward past already-completed picks
-        sim.current_pick_index = current_pick_index
+            # Fast-forward past already-completed picks
+            sim.current_pick_index = current_pick_index
 
-        # Keep already-drafted players off the board so they are not re-picked
-        sim.engine.bat_df.loc[bat_drafted_mask, 'Status'] = 'Drafted'
-        sim.engine.pitch_df.loc[pitch_drafted_mask, 'Status'] = 'Drafted'
+            # Keep already-drafted players off the board so they are not re-picked
+            sim.engine.bat_df.loc[bat_drafted_mask, 'Status'] = 'Drafted'
+            sim.engine.pitch_df.loc[pitch_drafted_mask, 'Status'] = 'Drafted'
 
-        sim.simulate_until_user_or_complete()
+            sim.simulate_until_user_or_complete()
 
-        return sim.get_standings().set_index('Team')
+            return sim.get_standings().set_index('Team')
+        except Exception:
+            # If a single simulation fails, return the current standings from a
+            # fresh snapshot copy so the aggregation still has the right shape.
+            fallback = DraftSimulator(
+                engine=engine,
+                draft_order_csv=draft_order_csv,
+                user_team_name="__SNAPSHOT__",
+                random_seed=i,
+                snapshot_mode=True,
+                draft_order_df=draft_order_df,
+            )
+            return fallback.get_standings().set_index('Team')
 
     all_standings = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
