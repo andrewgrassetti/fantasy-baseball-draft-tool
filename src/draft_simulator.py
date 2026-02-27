@@ -87,12 +87,12 @@ class DraftSimulator:
     # Offense (high to low): 1B, OF, SS, 3B, 2B, C
     # Pitching (high to low): SP, RP
     POSITION_PRIORITY = {
-        '1B': 1.30,
+        '1B': 1.35,
         'OF': 1.30,
         'SS': 1.25,
         '3B': 1.25,
         '2B': 1.25,
-        'C':  1.05,
+        'C':  1.00,
         'SP': 1.25,
         'RP': 1.10,
     }
