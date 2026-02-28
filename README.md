@@ -154,10 +154,11 @@ The app will open in your default browser at `http://localhost:8501`.
 
 ### 3. Draft Room (⚾ Tab)
 
-1. **Make a Pick** — Select the drafting team, search for a player in the dropdown, and click **Confirm Pick**.
-2. **Live Standings** — The 5×5 roto standings table updates instantly after every pick.
-3. **Undo a Pick** — Select any previously drafted (non-keeper) player from the undo dropdown and click ⚠️ **Undo Pick**.
-4. **Browse Available Players** — Toggle between Batters and Pitchers to view paginated tables of remaining players sorted by auction dollar value.
+1. **Make a Pick** — Click a player row in the **Top Available Players** table to select them. The selected player's name appears in the **Make a Pick** panel. Choose the drafting team, then click **⚾ Draft Player** to confirm the pick immediately, or **📋 Add to Queue** to add them to your personal Draft Queue.
+2. **Draft Queue** — A prioritised wish-list of players you want to target. Use the ⬆️/⬇️ buttons to reorder, ❌ to remove, or **⚾ Draft #1** to instantly draft the top-ranked queued player. Players that are drafted by any team are automatically removed from the queue.
+3. **Live Standings** — The 5×5 roto standings table updates instantly after every pick.
+4. **Undo a Pick** — Select any previously drafted (non-keeper) player from the undo dropdown and click ⚠️ **Undo Pick**.
+5. **Browse Available Players** — Toggle between Batters and Pitchers, filter by position, and sort by any stat column. Players already in your queue are marked with ✅.
 
 ### 4. Market Analysis (📊 Tab)
 

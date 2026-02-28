@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import time
@@ -19,6 +20,22 @@ if 'engine' not in st.session_state:
         st.session_state.engine = DraftEngine(bat_df, pitch_df)
 
 engine = st.session_state.engine
+
+# --- DRAFT ROOM STATE ---
+if 'draft_queue' not in st.session_state:
+    st.session_state.draft_queue = []
+if 'selected_player' not in st.session_state:
+    st.session_state.selected_player = None
+
+# Auto-cleanup: remove unavailable players from the draft queue
+if st.session_state.draft_queue:
+    available_pids = set(
+        engine.bat_df[engine.bat_df['Status'] == 'Available']['PlayerId'].tolist() +
+        engine.pitch_df[engine.pitch_df['Status'] == 'Available']['PlayerId'].tolist()
+    )
+    st.session_state.draft_queue = [
+        p for p in st.session_state.draft_queue if p['PlayerId'] in available_pids
+    ]
 
 # --- TABS ---
 tab0, tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters", "🎲 Draft Simulator"])
@@ -271,6 +288,48 @@ with tab0:
 # TAB 1: DRAFT ROOM (MAIN DASHBOARD)
 # ==========================================
 with tab1:
+    # Pre-compute selected_player from table selection state.  Streamlit stores
+    # widget state in st.session_state before the script body runs on each rerun,
+    # so we can read the table's selection here before rendering col1 which
+    # depends on it — avoiding a one-rerun lag.
+    _view_pre = st.session_state.get('available_players_view', 'Batters')
+    if _view_pre == 'Batters':
+        _df_pre = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
+        _pre_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA',
+                     'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+    else:
+        _df_pre = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
+        _pre_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS',
+                     'K/9', 'WAR', 'ADP', 'Dollars']
+    _pre_cols = [c for c in _pre_cols if c in _df_pre.columns]
+    _pos_pre = st.session_state.get('avail_pos_filter', 'All')
+    if _pos_pre and _pos_pre != 'All':
+        _df_pre = _df_pre[_df_pre['POS'].fillna('').apply(
+            lambda x: _pos_pre in [p.strip() for p in str(x).split('/')])]
+    _sort_by_pre = st.session_state.get('avail_sort_by', 'Dollars')
+    _sort_order_pre = st.session_state.get('avail_sort_order', 'Descending')
+    if _sort_by_pre and _sort_by_pre in _df_pre.columns:
+        _df_pre = _df_pre.sort_values(
+            by=_sort_by_pre, ascending=(_sort_order_pre == 'Ascending'), na_position='last')
+    _tbl_state = st.session_state.get('available_players_table')
+    if _tbl_state is not None and hasattr(_tbl_state, 'selection') and _tbl_state.selection.rows:
+        _ridx = _tbl_state.selection.rows[0]
+        if _ridx < len(_df_pre):
+            _r = _df_pre.iloc[_ridx]
+            _dollars = _r.get('Dollars') if 'Dollars' in _df_pre.columns else None
+            st.session_state.selected_player = {
+                'PlayerId': _r['PlayerId'],
+                'Name': _r['Name'],
+                'POS': _r['POS'],
+                'is_pitcher': (_view_pre == 'Pitchers'),
+                'Dollars': float(_dollars) if _dollars is not None and not pd.isna(_dollars) else None,
+            }
+        else:
+            st.session_state.selected_player = None
+    elif _tbl_state is not None:
+        # Table rendered with no selection
+        st.session_state.selected_player = None
+
     # Top Row: Input and Standings
     col1, col2 = st.columns([1, 2])
     
@@ -280,31 +339,64 @@ with tab1:
         # 1. Select Team making the pick
         drafting_team = st.selectbox("Drafting Team", list(engine.teams.keys()))
         
-        # 2. Search Player
-        # Combine Batters and Pitchers for search
-        # Filter only Available players for the dropdown to reduce clutter
-        avail_bat = engine.bat_df[engine.bat_df['Status'] == 'Available']
-        avail_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Available']
+        # 2. Display selected player (populated by clicking a row in the table below)
+        sel = st.session_state.selected_player
+        if sel:
+            st.info(f"**Selected:** {sel['Name']} ({sel['POS']})")
+        else:
+            st.caption("Click a player row below to select")
         
-        # Create a display string: "Name (POS) - Team"
-        search_options = {} # Map "Display Name" -> (ID, IsPitcher)
+        # 3. Action buttons
+        draft_btn_col, queue_btn_col = st.columns(2)
+        with draft_btn_col:
+            if st.button("⚾ Draft Player", type="primary", disabled=(sel is None)):
+                engine.process_pick(sel['PlayerId'], drafting_team, sel['is_pitcher'])
+                st.toast(f"Drafted {sel['Name']} to {drafting_team}!")
+                st.session_state.selected_player = None
+                if 'available_players_table' in st.session_state:
+                    del st.session_state['available_players_table']
+                st.rerun()
+        with queue_btn_col:
+            if st.button("📋 Add to Queue", disabled=(sel is None)):
+                if not any(q['PlayerId'] == sel['PlayerId'] for q in st.session_state.draft_queue):
+                    st.session_state.draft_queue.append(sel.copy())
+                    st.toast(f"Added {sel['Name']} to queue!")
+                else:
+                    st.toast(f"{sel['Name']} is already in the queue.")
         
-        for _, row in avail_bat.iterrows():
-            label = f"{row['Name']} ({row['POS']})"
-            search_options[label] = (row['PlayerId'], False)
-            
-        for _, row in avail_pitch.iterrows():
-            label = f"{row['Name']} (P) - {row['Team']}"
-            search_options[label] = (row['PlayerId'], True)
-            
-        selected_label = st.selectbox("Select Player", options=list(search_options.keys()))
-        
-        if st.button("Confirm Pick", type="primary"):
-            pid, is_pitcher = search_options[selected_label]
-            engine.process_pick(pid, drafting_team, is_pitcher)
-            st.success(f"Drafted {selected_label} to {drafting_team}")
-            st.rerun()
-        
+        # 4. Draft Queue panel
+        if st.session_state.draft_queue:
+            st.divider()
+            st.subheader("📋 Draft Queue")
+            top = st.session_state.draft_queue[0]
+            if st.button(f"⚾ Draft #1: {top['Name']}", type="secondary"):
+                engine.process_pick(top['PlayerId'], drafting_team, top['is_pitcher'])
+                st.toast(f"Drafted {top['Name']} to {drafting_team}!")
+                st.session_state.draft_queue.pop(0)
+                st.session_state.selected_player = None
+                if 'available_players_table' in st.session_state:
+                    del st.session_state['available_players_table']
+                st.rerun()
+            for i, qp in enumerate(st.session_state.draft_queue):
+                dollars_str = f" — ${qp['Dollars']:.0f}" if pd.notna(qp.get('Dollars')) else ""
+                qc1, qc2, qc3, qc4 = st.columns([4, 1, 1, 1])
+                with qc1:
+                    st.text(f"{i + 1}. {qp['Name']} ({qp['POS']}){dollars_str}")
+                with qc2:
+                    if i > 0 and st.button("⬆️", key=f"q_up_{i}"):
+                        st.session_state.draft_queue[i], st.session_state.draft_queue[i - 1] = \
+                            st.session_state.draft_queue[i - 1], st.session_state.draft_queue[i]
+                        st.rerun()
+                with qc3:
+                    if i < len(st.session_state.draft_queue) - 1 and st.button("⬇️", key=f"q_down_{i}"):
+                        st.session_state.draft_queue[i], st.session_state.draft_queue[i + 1] = \
+                            st.session_state.draft_queue[i + 1], st.session_state.draft_queue[i]
+                        st.rerun()
+                with qc4:
+                    if st.button("❌", key=f"q_remove_{i}"):
+                        st.session_state.draft_queue.pop(i)
+                        st.rerun()
+
         # --- UNDO PICK SECTION ---
         st.divider()
         st.header("Undo Pick")
@@ -391,9 +483,21 @@ with tab1:
     
     if total_players > 0:
         st.caption(f"{total_players} available players")
-        st.dataframe(df_show[cols], hide_index=True, height=600)
+        # Add Queued column to indicate players already in the draft queue
+        queued_pids = {q['PlayerId'] for q in st.session_state.draft_queue}
+        df_show['Queued'] = df_show['PlayerId'].apply(lambda pid: '✅' if pid in queued_pids else '')
+        display_cols = ['Queued'] + cols
+        st.dataframe(
+            df_show[display_cols],
+            hide_index=True,
+            height=600,
+            selection_mode="single-row",
+            on_select="rerun",
+            key="available_players_table",
+        )
     else:
         st.info("No available players found.")
+        st.session_state.selected_player = None
 
     # ==========================================
     # SNAPSHOT PROJECTIONS SECTION (tab1)
@@ -727,7 +831,6 @@ with tab4:
             try:
                 # Parse and validate CSV
                 from io import StringIO
-                import pandas as pd
                 draft_df = pd.read_csv(StringIO(csv_content))
                 
                 st.success("✅ CSV uploaded successfully!")
@@ -765,7 +868,6 @@ Team Alpha,4,hitting""", language="csv")
         with col1:
             # Get unique team names from CSV
             from io import StringIO
-            import pandas as pd
             draft_df = pd.read_csv(StringIO(st.session_state.draft_csv))
             csv_team_names = sorted(draft_df['player_name'].unique())
             
