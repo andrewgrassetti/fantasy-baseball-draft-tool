@@ -559,7 +559,7 @@ with tab1:
                 "Simulations",
                 min_value=10,
                 max_value=1000,
-                value=200,
+                value=50,
                 step=10,
                 key="snap_n_sims",
                 help="Number of Monte Carlo simulations to run (100–1000 recommended).",
