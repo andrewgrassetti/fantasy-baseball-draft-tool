@@ -1439,7 +1439,7 @@ def run_monte_carlo_snapshot(
                     pitch_avail = sim.engine.pitch_df.loc[
                         sim.engine.pitch_df['Status'].values == 'Available', 'PlayerId'
                     ].values
-                    available_at_user_pick = set(bat_avail.tolist() + pitch_avail.tolist())
+                    available_at_user_pick = set(np.concatenate([bat_avail, pitch_avail]))
 
             # Continue running to completion
             sim.simulate_until_user_or_complete()
