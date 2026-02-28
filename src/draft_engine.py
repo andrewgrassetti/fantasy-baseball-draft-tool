@@ -322,6 +322,71 @@ class DraftEngine:
         df = df.sort_values(by=['Type', 'POS', 'Name'], ascending=[True, True, True])
         return df.reset_index(drop=True)
 
+    def get_team_slot_assignments(self, team_name):
+        """Returns a dict mapping slot labels to player names for a team.
+
+        Replays the slot-assignment logic from Team.add_player so that each
+        rostered player is placed in a concrete slot label like ``C``,
+        ``OF 1``, ``SP 2``, ``BN 3``, etc.  Multi-slot positions (e.g. OF×3)
+        are numbered starting at 1.
+
+        Returns:
+            dict[str, str]: slot label → player name.  Empty slots are omitted.
+        """
+        team = self.teams.get(team_name)
+        if not team:
+            return {}
+
+        slot_limits = Team.SLOT_LIMITS
+        filled = {k: 0 for k in slot_limits}
+        assignments: dict[str, str] = {}
+
+        for player in team.roster:
+            pos = player.position
+            if pd.isna(pos) or pos is None:
+                possible_pos = ['P'] if player.is_pitcher else ['Util']
+            else:
+                possible_pos = [p.strip() for p in str(pos).split('/')]
+
+            assigned = False
+
+            if not player.is_pitcher:
+                for p in possible_pos:
+                    if p in slot_limits and filled[p] < slot_limits[p]:
+                        filled[p] += 1
+                        label = f"{p} {filled[p]}" if slot_limits[p] > 1 else p
+                        assignments[label] = player.name
+                        assigned = True
+                        break
+                if not assigned and filled['Util'] < slot_limits['Util']:
+                    filled['Util'] += 1
+                    label = f"Util {filled['Util']}" if slot_limits['Util'] > 1 else 'Util'
+                    assignments[label] = player.name
+                    assigned = True
+            else:
+                if 'SP' in possible_pos and filled['SP'] < slot_limits['SP']:
+                    filled['SP'] += 1
+                    label = f"SP {filled['SP']}" if slot_limits['SP'] > 1 else 'SP'
+                    assignments[label] = player.name
+                    assigned = True
+                elif 'RP' in possible_pos and filled['RP'] < slot_limits['RP']:
+                    filled['RP'] += 1
+                    label = f"RP {filled['RP']}" if slot_limits['RP'] > 1 else 'RP'
+                    assignments[label] = player.name
+                    assigned = True
+                if not assigned and filled['P'] < slot_limits['P']:
+                    filled['P'] += 1
+                    label = f"P {filled['P']}" if slot_limits['P'] > 1 else 'P'
+                    assignments[label] = player.name
+                    assigned = True
+
+            if not assigned and filled['BN'] < slot_limits['BN']:
+                filled['BN'] += 1
+                label = f"BN {filled['BN']}"
+                assignments[label] = player.name
+
+        return assignments
+
     def get_roster_summary(self, team_name):
         """Returns a dictionary summarizing filled vs. total slots for a team.
         
