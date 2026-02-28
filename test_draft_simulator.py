@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import sys
 from src.draft_engine import DraftEngine
-from src.draft_simulator import DraftSimulator
+from src.draft_simulator import DraftSimulator, run_monte_carlo_snapshot
 
 
 def _make_test_data(dollar_values_bat, dollar_values_pitch):
@@ -520,6 +520,111 @@ def test_catchers_not_overdrafted_in_early_rounds():
         return False
 
 
+def test_snapshot_availability_probabilities():
+    """run_monte_carlo_snapshot should return availability probabilities when
+    user_team_name is provided.
+
+    With 2 teams and 6 total players over 3 rounds, the user (Team_B) picks
+    second.  All players currently available should appear in the availability
+    probabilities dict with values between 0 and 1.  The highest-dollar player
+    should have a lower availability probability (more likely to be drafted by
+    the first-picking AI team before Team_B's turn).
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Snapshot availability probabilities")
+    print("=" * 60)
+
+    bat_dollars = [50, 30, 10]
+    pitch_dollars = [40, 20, 5]
+
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Team_A', 'Team_B']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=3)
+
+    result = run_monte_carlo_snapshot(
+        engine=engine,
+        draft_order_csv=csv,
+        n_simulations=50,
+        user_team_name='Team_B',
+        max_workers=1,
+    )
+
+    avail_probs = result.get('availability_probabilities', {})
+    print(f"  Availability probabilities returned: {len(avail_probs)} players")
+
+    passed = True
+
+    # Should have availability data for players
+    if not avail_probs:
+        print("  ❌ FAILED: No availability probabilities returned")
+        passed = False
+    else:
+        # All probabilities should be between 0 and 1
+        for pid, prob in avail_probs.items():
+            if not (0.0 <= prob <= 1.0):
+                print(f"  ❌ FAILED: Probability for {pid} is {prob}, expected 0-1")
+                passed = False
+                break
+
+        # The highest dollar batter (Batter 0, $50) should have lower availability
+        # than the lowest dollar batter (Batter 2, $10) since Team_A picks first
+        # and prefers high-value players.
+        top_pid = '1000'  # Batter 0, $50
+        low_pid = '1002'  # Batter 2, $10
+        if top_pid in avail_probs and low_pid in avail_probs:
+            top_avail = avail_probs[top_pid]
+            low_avail = avail_probs[low_pid]
+            print(f"  Top batter ($50) availability: {top_avail:.2f}")
+            print(f"  Low batter ($10) availability: {low_avail:.2f}")
+            if top_avail > low_avail:
+                print("  ❌ FAILED: Top batter should have lower availability than low batter")
+                passed = False
+        else:
+            print(f"  ⚠️ Could not compare: top_pid={top_pid in avail_probs}, low_pid={low_pid in avail_probs}")
+
+    if passed:
+        print("  ✅ PASSED: Availability probabilities computed correctly")
+    else:
+        print("  ❌ FAILED")
+    return passed
+
+
+def test_snapshot_no_availability_without_user():
+    """run_monte_carlo_snapshot should return empty availability when
+    user_team_name is not provided.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Snapshot no availability without user_team_name")
+    print("=" * 60)
+
+    bat_dollars = [50, 30]
+    pitch_dollars = [40]
+
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Team_A', 'Team_B']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=1)
+
+    result = run_monte_carlo_snapshot(
+        engine=engine,
+        draft_order_csv=csv,
+        n_simulations=10,
+        max_workers=1,
+    )
+
+    avail_probs = result.get('availability_probabilities', {})
+    passed = len(avail_probs) == 0
+
+    if passed:
+        print("  ✅ PASSED: No availability probabilities when user_team_name not provided")
+    else:
+        print(f"  ❌ FAILED: Got {len(avail_probs)} availability entries, expected 0")
+    return passed
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -532,6 +637,8 @@ if __name__ == '__main__':
     t5 = test_empty_candidate_handling()
     t6 = test_position_diversity_in_shortlist()
     t7 = test_catchers_not_overdrafted_in_early_rounds()
+    t8 = test_snapshot_availability_probabilities()
+    t9 = test_snapshot_no_availability_without_user()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -543,8 +650,10 @@ if __name__ == '__main__':
     print(f"Test 5 (Empty candidate handling): {'✅ PASSED' if t5 else '❌ FAILED'}")
     print(f"Test 6 (Position diversity in shortlist): {'✅ PASSED' if t6 else '❌ FAILED'}")
     print(f"Test 7 (Catchers not overdrafted): {'✅ PASSED' if t7 else '❌ FAILED'}")
+    print(f"Test 8 (Snapshot availability probs): {'✅ PASSED' if t8 else '❌ FAILED'}")
+    print(f"Test 9 (No availability without user): {'✅ PASSED' if t9 else '❌ FAILED'}")
 
-    if t1 and t2 and t3 and t4 and t5 and t6 and t7:
+    if t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
     else:

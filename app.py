@@ -28,6 +28,8 @@ if 'selected_player' not in st.session_state:
     st.session_state.selected_player = None
 if 'table_key_counter' not in st.session_state:
     st.session_state.table_key_counter = 0
+if 'user_team_name' not in st.session_state:
+    st.session_state.user_team_name = None
 
 # --- SIMULATOR STATE ---
 if 'sim_draft_queue' not in st.session_state:
@@ -353,6 +355,61 @@ with tab1:
         # Table rendered with no selection
         st.session_state.selected_player = None
 
+    # --- DRAFT ORDER & USER TEAM SETUP ---
+    st.subheader("📋 Draft Setup")
+
+    _setup_col1, _setup_col2 = st.columns([2, 1])
+
+    with _setup_col1:
+        _draft_order_uploaded = st.file_uploader(
+            "Upload Draft Order CSV",
+            type=['csv'],
+            key="draft_room_csv_uploader",
+            help="CSV must have 3 columns: player_name, pick_number, tendency",
+        )
+        if _draft_order_uploaded is not None:
+            st.session_state.draft_csv = _draft_order_uploaded.getvalue().decode('utf-8')
+            st.success("✅ Draft order CSV loaded.")
+
+    with _setup_col2:
+        st.markdown("**CSV Format:**")
+        st.code("player_name,pick_number,tendency\nTeam A,1,hitting\nTeam B,2,pitching", language="csv")
+
+    if 'draft_csv' in st.session_state and st.session_state.draft_csv:
+        from io import StringIO
+        _draft_order_df = pd.read_csv(StringIO(st.session_state.draft_csv))
+        _csv_team_names = sorted(_draft_order_df['player_name'].unique())
+
+        _user_team = st.selectbox(
+            "Your Team",
+            options=_csv_team_names,
+            key="user_team_select",
+            help="Select your team from the draft order",
+        )
+        st.session_state.user_team_name = _user_team
+    else:
+        st.info("Upload a draft order CSV to enable auto-drafter and snapshot features.")
+        _draft_order_df = None
+
+    # Determine auto-drafter from draft order + picks made
+    _auto_drafter = None
+    _auto_pick_number = None
+    _is_user_turn = False
+    if _draft_order_df is not None:
+        _auto_pick_index = engine.get_total_picks_made()
+        if _auto_pick_index < len(_draft_order_df):
+            _auto_drafter = _draft_order_df.iloc[_auto_pick_index]['player_name']
+            _auto_pick_number = int(_draft_order_df.iloc[_auto_pick_index]['pick_number'])
+            _is_user_turn = (_auto_drafter == st.session_state.get('user_team_name'))
+
+    if _auto_drafter:
+        if _is_user_turn:
+            st.success(f"🎯 **YOUR PICK!** Pick #{_auto_pick_number} — {_auto_drafter}")
+        else:
+            st.info(f"📍 Pick #{_auto_pick_number} — {_auto_drafter}")
+
+    st.divider()
+
     # Top Row: Standings and Undo
     top_col1, top_col2 = st.columns([2, 1])
 
@@ -386,6 +443,7 @@ with tab1:
                 undo_pid = undo_options[selected_undo_label]
                 if engine.undo_pick(undo_pid):
                     st.success(f"Undone: {selected_undo_label}")
+                    st.session_state.pop('snapshot_availability', None)
                     st.rerun()
                 else:
                     st.error("Failed to undo pick. Player may be a keeper or not found.")
@@ -445,8 +503,17 @@ with tab1:
     with action_col:
         st.markdown("#### Make a Pick")
 
-        # 1. Select Team making the pick
-        drafting_team = st.selectbox("Drafting Team", list(engine.teams.keys()))
+        # 1. Select Team making the pick (auto-defaults to draft order; override for pick trades)
+        _team_list = list(engine.teams.keys())
+        _default_team_idx = 0
+        if _auto_drafter and _auto_drafter in _team_list:
+            _default_team_idx = _team_list.index(_auto_drafter)
+        drafting_team = st.selectbox(
+            "Drafting Team",
+            _team_list,
+            index=_default_team_idx,
+            help="Auto-set from draft order. Override for mid-draft pick trades.",
+        )
 
         # 2. Display selected player (populated by clicking a row in the table)
         sel = st.session_state.selected_player
@@ -463,6 +530,7 @@ with tab1:
                 st.toast(f"Drafted {sel['Name']} to {drafting_team}!")
                 st.session_state.selected_player = None
                 st.session_state.table_key_counter += 1
+                st.session_state.pop('snapshot_availability', None)
                 st.rerun()
         with queue_btn_col:
             if st.button("📋 Add to Queue", disabled=(sel is None)):
@@ -483,6 +551,7 @@ with tab1:
                 st.session_state.draft_queue.pop(0)
                 st.session_state.selected_player = None
                 st.session_state.table_key_counter += 1
+                st.session_state.pop('snapshot_availability', None)
                 st.rerun()
             for i, qp in enumerate(st.session_state.draft_queue):
                 dollars_str = f" — ${qp['Dollars']:.0f}" if pd.notna(qp.get('Dollars')) else ""
@@ -510,7 +579,15 @@ with tab1:
             # Add Queued column to indicate players already in the draft queue
             queued_pids = {q['PlayerId'] for q in st.session_state.draft_queue}
             df_show['Queued'] = df_show['PlayerId'].apply(lambda pid: '✅' if pid in queued_pids else '')
-            display_cols = ['Queued'] + cols
+            # Add availability probability column if snapshot data exists
+            _avail_probs = st.session_state.get('snapshot_availability')
+            if _avail_probs:
+                df_show['Avail%'] = df_show['PlayerId'].apply(
+                    lambda pid: round(_avail_probs[pid] * 100, 1) if pid in _avail_probs else None
+                )
+                display_cols = ['Queued', 'Avail%'] + cols
+            else:
+                display_cols = ['Queued'] + cols
             st.dataframe(
                 df_show[display_cols],
                 hide_index=True,
@@ -533,23 +610,6 @@ with tab1:
         "end-of-draft 5×5 category totals for all teams. "
         "The live draft is never modified — all simulations use isolated copies."
     )
-
-    # Draft order CSV upload (shared with Simulator tab via session state)
-    snap_csv_col, snap_info_col = st.columns([2, 1])
-    with snap_csv_col:
-        snap_uploaded = st.file_uploader(
-            "Upload Draft Order CSV (required)",
-            type=['csv'],
-            key="snapshot_csv_uploader",
-            help="Same CSV format used in the Simulator tab: player_name, pick_number, tendency",
-        )
-        if snap_uploaded is not None:
-            st.session_state.draft_csv = snap_uploaded.getvalue().decode('utf-8')
-            st.success("✅ Draft order CSV loaded.")
-
-    with snap_info_col:
-        st.markdown("**CSV Format:**")
-        st.code("player_name,pick_number,tendency\nTeam A,1,hitting\nTeam B,2,pitching", language="csv")
 
     if 'draft_csv' in st.session_state and st.session_state.draft_csv:
         snap_col1, snap_col2 = st.columns([1, 1])
@@ -586,10 +646,12 @@ with tab1:
                     draft_order_csv=st.session_state.draft_csv,
                     n_simulations=int(n_sims),
                     progress_callback=_snap_cb,
+                    user_team_name=st.session_state.get('user_team_name'),
                 )
                 snap_elapsed = time.time() - snap_start
                 st.session_state.snapshot_results = snapshot_results
                 st.session_state.snapshot_elapsed = snap_elapsed
+                st.session_state.snapshot_availability = snapshot_results.get('availability_probabilities', {})
                 snap_progress.progress(1.0, text="Done!")
             except Exception as exc:
                 snap_progress.empty()
