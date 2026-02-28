@@ -36,6 +36,8 @@ if 'sim_selected_player' not in st.session_state:
     st.session_state.sim_selected_player = None
 if 'sim_table_key_counter' not in st.session_state:
     st.session_state.sim_table_key_counter = 0
+if 'sim_new_picks' not in st.session_state:
+    st.session_state.sim_new_picks = []
 
 # Auto-cleanup: remove unavailable players from the draft queue
 if st.session_state.draft_queue:
@@ -942,6 +944,7 @@ Team Alpha,4,hitting""", language="csv")
                 st.session_state.sim_draft_queue = []
                 st.session_state.sim_selected_player = None
                 st.session_state.sim_table_key_counter = 0
+                st.session_state.sim_new_picks = []
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Error starting simulation: {str(e)}")
@@ -995,6 +998,7 @@ Team Alpha,4,hitting""", language="csv")
             # Run simulation until user's turn or completion
             if not simulator.simulation_complete and not simulator.is_paused:
                 new_picks = simulator.simulate_until_user_or_complete()
+                st.session_state.sim_new_picks = new_picks
 
             # Show current pick status
             if simulator.simulation_complete:
@@ -1025,6 +1029,22 @@ Team Alpha,4,hitting""", language="csv")
                                 st.text(f"#{pick['pick_number']}: {pick['team_name']} - {pick['player_name']} ({pick['position']}) - {pick['rationale']}")
                 else:
                     st.info("No picks yet.")
+
+            # --- SIMULATED PICKS ---
+            if st.session_state.sim_new_picks:
+                st.divider()
+                st.subheader("🤖 Simulated Picks")
+                for pick in st.session_state.sim_new_picks:
+                    col1, col2, col3, col4 = st.columns([1, 2, 3, 4])
+                    with col1:
+                        st.text(f"#{pick['pick_number']}")
+                    with col2:
+                        st.text(pick['team_name'])
+                    with col3:
+                        player_type = "⚾" if not pick['is_pitcher'] else "🥎"
+                        st.text(f"{player_type} {pick['player_name']} ({pick['position']})")
+                    with col4:
+                        st.caption(pick['rationale'])
 
             # Available Players section with action panel to the left
             st.divider()
@@ -1327,6 +1347,7 @@ Team Alpha,4,hitting""", language="csv")
                     st.session_state.sim_draft_queue = []
                     st.session_state.sim_selected_player = None
                     st.session_state.sim_table_key_counter = 0
+                    st.session_state.sim_new_picks = []
                     st.rerun()
     else:
         st.info("👆 Upload a draft order CSV to begin")
