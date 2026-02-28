@@ -603,10 +603,10 @@ with tab1:
             # Add availability probability column if snapshot data exists
             _avail_probs = st.session_state.get('snapshot_availability')
             if _avail_probs:
-                df_show['Prob. Avail'] = df_show['PlayerId'].apply(
+                df_show['Prob_avail'] = df_show['PlayerId'].apply(
                     lambda pid: round(_avail_probs[pid], 2) if pid in _avail_probs else 0.00
                 )
-                display_cols = ['Queued', 'Prob. Avail'] + cols
+                display_cols = ['Queued', 'Prob_avail'] + cols
             else:
                 display_cols = ['Queued'] + cols
             st.dataframe(
@@ -674,6 +674,7 @@ with tab1:
                 st.session_state.snapshot_elapsed = snap_elapsed
                 st.session_state.snapshot_availability = snapshot_results.get('availability_probabilities', {})
                 snap_progress.progress(1.0, text="Done!")
+                st.rerun()
             except Exception as exc:
                 snap_progress.empty()
                 st.error(f"❌ Snapshot failed: {exc}")
@@ -846,7 +847,72 @@ with tab3:
 
     roster_grid_df = pd.DataFrame(grid_data).set_index('Slot')
 
-    st.dataframe(roster_grid_df, use_container_width=True, height=700)
+    # --- Styled roster table with group shading and bold boundaries ---
+    # Define logical slot groups for visual separation
+    _batter_slots = {'C', '1B', '2B', '3B', 'SS', 'OF 1', 'OF 2', 'OF 3', 'Util 1', 'Util 2'}
+    _pitcher_slots = {'SP 1', 'SP 2', 'SP 3', 'RP 1', 'RP 2', 'P'}
+    _bench_slots = {f'BN {i}' for i in range(1, 7)}
+    # IL/NA slots are the remainder
+
+    def _slot_group(slot):
+        if slot in _batter_slots:
+            return 'batter'
+        elif slot in _pitcher_slots:
+            return 'pitcher'
+        elif slot in _bench_slots:
+            return 'bench'
+        return 'reserve'
+
+    _group_colors = {
+        'batter': '#e8f4fd',
+        'pitcher': '#fce4ec',
+        'bench': '#f1f8e9',
+        'reserve': '#f5f5f5',
+    }
+
+    # Build HTML table
+    _html_parts = []
+    _html_parts.append('<div style="overflow-x:auto;">')
+    _html_parts.append(
+        '<table style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:14px;">'
+    )
+    # Header row
+    _html_parts.append('<thead><tr>')
+    _html_parts.append(
+        '<th style="padding:10px 12px;text-align:center;font-weight:bold;'
+        'border:2px solid #555;background:#37474f;color:#fff;">Slot</th>'
+    )
+    for tn in team_names:
+        _html_parts.append(
+            f'<th style="padding:10px 12px;text-align:center;font-weight:bold;'
+            f'border:2px solid #555;background:#37474f;color:#fff;">{tn}</th>'
+        )
+    _html_parts.append('</tr></thead><tbody>')
+
+    # Data rows with group shading and bold group boundaries
+    prev_group = None
+    for slot in _slot_rows:
+        grp = _slot_group(slot)
+        bg = _group_colors[grp]
+        top_border = '3px solid #333' if prev_group is not None and grp != prev_group else '1px solid #bbb'
+        _html_parts.append(f'<tr style="background:{bg};">')
+        _html_parts.append(
+            f'<td style="padding:6px 10px;text-align:center;font-weight:bold;'
+            f'border-left:2px solid #555;border-right:2px solid #555;'
+            f'border-top:{top_border};border-bottom:1px solid #bbb;">{slot}</td>'
+        )
+        for tn in team_names:
+            val = roster_grid_df.loc[slot, tn] if slot in roster_grid_df.index else ''
+            _html_parts.append(
+                f'<td style="padding:6px 10px;text-align:center;'
+                f'border-left:2px solid #555;border-right:2px solid #555;'
+                f'border-top:{top_border};border-bottom:1px solid #bbb;">{val}</td>'
+            )
+        _html_parts.append('</tr>')
+        prev_group = grp
+
+    _html_parts.append('</tbody></table></div>')
+    st.markdown(''.join(_html_parts), unsafe_allow_html=True)
 
 
 # ==========================================
