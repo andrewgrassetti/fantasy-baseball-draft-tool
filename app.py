@@ -321,10 +321,17 @@ with tab1:
         _df_pre = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
         _pre_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA',
                      'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
-    else:
+    elif _view_pre == 'Pitchers':
         _df_pre = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
         _pre_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS',
                      'K/9', 'WAR', 'ADP', 'Dollars']
+    else:
+        _df_bat = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
+        _df_bat['_is_pitcher'] = False
+        _df_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
+        _df_pitch['_is_pitcher'] = True
+        _pre_cols = ['Name', 'POS', 'Team', 'WAR', 'ADP', 'Dollars']
+        _df_pre = pd.concat([_df_bat, _df_pitch], ignore_index=True)
     _pre_cols = [c for c in _pre_cols if c in _df_pre.columns]
     _pos_pre = st.session_state.get('avail_pos_filter', 'All')
     if _pos_pre and _pos_pre != 'All':
@@ -346,7 +353,7 @@ with tab1:
                 'PlayerId': _r['PlayerId'],
                 'Name': _r['Name'],
                 'POS': _r['POS'],
-                'is_pitcher': (_view_pre == 'Pitchers'),
+                'is_pitcher': bool(_r.get('_is_pitcher', _view_pre == 'Pitchers')),
                 'Dollars': float(_dollars) if _dollars is not None and not pd.isna(_dollars) else None,
             }
         else:
@@ -457,7 +464,7 @@ with tab1:
     if 'available_players_view' not in st.session_state:
         st.session_state.available_players_view = "Batters"
 
-    view_options = ["Batters", "Pitchers"]
+    view_options = ["Batters", "Pitchers", "All Players"]
     view_option = st.radio("View", view_options, horizontal=True,
                            index=view_options.index(st.session_state.available_players_view))
     st.session_state.available_players_view = view_option
@@ -473,12 +480,26 @@ with tab1:
             for p in str(pos).split('/'):
                 all_positions.add(p.strip())
         all_positions = sorted(all_positions)
-    else:
+    elif view_option == "Pitchers":
         df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
         cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
         # Filter to only columns that exist in the DataFrame
         cols = [col for col in cols if col in df_show.columns]
         all_positions = sorted(df_show['POS'].dropna().unique())
+    else:
+        # All Players: combine batters and pitchers with shared columns
+        df_bat = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
+        df_bat['_is_pitcher'] = False
+        df_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
+        df_pitch['_is_pitcher'] = True
+        df_show = pd.concat([df_bat, df_pitch], ignore_index=True)
+        cols = ['Name', 'POS', 'Team', 'WAR', 'ADP', 'Dollars']
+        cols = [col for col in cols if col in df_show.columns]
+        all_positions = set()
+        for pos in df_show['POS'].dropna().unique():
+            for p in str(pos).split('/'):
+                all_positions.add(p.strip())
+        all_positions = sorted(all_positions)
 
     # Position filter and sort controls
     pos_filter_col, sort_col1, sort_col2 = st.columns([2, 2, 1])
@@ -583,7 +604,7 @@ with tab1:
             _avail_probs = st.session_state.get('snapshot_availability')
             if _avail_probs:
                 df_show['Avail%'] = df_show['PlayerId'].apply(
-                    lambda pid: round(_avail_probs[pid] * 100, 1) if pid in _avail_probs else None
+                    lambda pid: round(_avail_probs[pid] * 100, 2) if pid in _avail_probs else None
                 )
                 display_cols = ['Queued', 'Avail%'] + cols
             else:
