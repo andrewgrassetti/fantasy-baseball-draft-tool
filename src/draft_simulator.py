@@ -1335,6 +1335,7 @@ def run_monte_carlo_snapshot(
     n_simulations: int = 200,
     progress_callback=None,
     max_workers: int = None,
+    user_team_name: str = None,
 ) -> dict:
     """Run N Monte Carlo simulations from the current draft state.
 
@@ -1347,6 +1348,11 @@ def run_monte_carlo_snapshot(
     the draft order, the simulator will reconcile the differences automatically
     (clamping the pick index, skipping unresolvable picks, etc.) so that
     simulations always complete without errors.
+
+    When ``user_team_name`` is provided, each simulation also captures which
+    players are still available just before the user's next pick.  The
+    proportion of simulations in which each player remains available is
+    returned as ``availability_probabilities``.
 
     Args:
         engine: The live DraftEngine (read-only; copied per simulation).
@@ -1361,6 +1367,9 @@ def run_monte_carlo_snapshot(
         max_workers: Number of parallel worker threads.  Defaults to
             ``min(4, n_simulations)``.  Pass 1 to run sequentially (useful
             for reproducible results with fixed random seeds).
+        user_team_name: Optional name of the user's team.  When provided,
+            availability probabilities are computed for each remaining player
+            at the user's next pick position.
 
     Returns:
         Dict with keys:
@@ -1368,6 +1377,9 @@ def run_monte_carlo_snapshot(
         - ``std_standings``: DataFrame (teams × 10 categories), std values.
         - ``n_simulations``: int
         - ``current_pick_index``: int
+        - ``availability_probabilities``: dict mapping PlayerId to float (0–1)
+          probability of being available at the user's next pick.  Empty if
+          ``user_team_name`` is not provided or the user has no remaining picks.
     """
     if max_workers is None:
         max_workers = min(4, n_simulations)
@@ -1388,7 +1400,15 @@ def run_monte_carlo_snapshot(
     else:
         current_pick_index = max(0, min(int(current_pick_index), len(draft_order_df)))
 
-    def _run_single_sim(i: int) -> pd.DataFrame:
+    # Determine the user's next pick index (if user_team_name provided)
+    user_next_pick_index = None
+    if user_team_name:
+        for i in range(current_pick_index, len(draft_order_df)):
+            if draft_order_df.iloc[i]['player_name'] == user_team_name:
+                user_next_pick_index = i
+                break
+
+    def _run_single_sim(i: int):
         try:
             sim = DraftSimulator(
                 engine=engine,
@@ -1406,9 +1426,25 @@ def run_monte_carlo_snapshot(
             sim.engine.bat_df.loc[bat_drafted_mask, 'Status'] = 'Drafted'
             sim.engine.pitch_df.loc[pitch_drafted_mask, 'Status'] = 'Drafted'
 
+            # If tracking availability, run pick-by-pick until user's next pick
+            available_at_user_pick = None
+            if user_next_pick_index is not None:
+                while not sim.simulation_complete and sim.current_pick_index < user_next_pick_index:
+                    sim.simulate_next_pick()
+                if not sim.simulation_complete:
+                    # Capture available players just before the user's pick
+                    bat_avail = sim.engine.bat_df.loc[
+                        sim.engine.bat_df['Status'].values == 'Available', 'PlayerId'
+                    ].values
+                    pitch_avail = sim.engine.pitch_df.loc[
+                        sim.engine.pitch_df['Status'].values == 'Available', 'PlayerId'
+                    ].values
+                    available_at_user_pick = set(np.concatenate([bat_avail, pitch_avail]))
+
+            # Continue running to completion
             sim.simulate_until_user_or_complete()
 
-            return sim.get_standings().set_index('Team')
+            return sim.get_standings().set_index('Team'), available_at_user_pick
         except Exception as exc:
             # If a single simulation fails, log the error and return the
             # current standings from a fresh snapshot copy so the
@@ -1422,17 +1458,20 @@ def run_monte_carlo_snapshot(
                 snapshot_mode=True,
                 draft_order_df=draft_order_df,
             )
-            return fallback.get_standings().set_index('Team')
+            return fallback.get_standings().set_index('Team'), None
 
     all_standings = []
+    all_availability = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(_run_single_sim, i) for i in range(n_simulations)]
         for i, future in enumerate(futures, 1):
-            all_standings.append(future.result())
+            standings, availability = future.result()
+            all_standings.append(standings)
+            all_availability.append(availability)
             if progress_callback is not None:
                 progress_callback(i / n_simulations)
 
-    # Aggregate across simulations
+    # Aggregate standings across simulations
     values = np.stack([df.values.astype(float) for df in all_standings])
     mean_vals = values.mean(axis=0)
     std_vals = values.std(axis=0)
@@ -1441,9 +1480,24 @@ def run_monte_carlo_snapshot(
     mean_standings = pd.DataFrame(mean_vals, index=ref.index, columns=ref.columns)
     std_standings = pd.DataFrame(std_vals, index=ref.index, columns=ref.columns)
 
+    # Aggregate availability probabilities across simulations
+    availability_probs = {}
+    n_valid_avail = sum(1 for a in all_availability if a is not None)
+    if n_valid_avail > 0:
+        availability_counts = {}
+        for availability in all_availability:
+            if availability is not None:
+                for pid in availability:
+                    availability_counts[pid] = availability_counts.get(pid, 0) + 1
+        availability_probs = {
+            pid: count / n_valid_avail
+            for pid, count in availability_counts.items()
+        }
+
     return {
         'mean_standings': mean_standings,
         'std_standings': std_standings,
         'n_simulations': n_simulations,
         'current_pick_index': current_pick_index,
+        'availability_probabilities': availability_probs,
     }
