@@ -29,6 +29,14 @@ if 'selected_player' not in st.session_state:
 if 'table_key_counter' not in st.session_state:
     st.session_state.table_key_counter = 0
 
+# --- SIMULATOR STATE ---
+if 'sim_draft_queue' not in st.session_state:
+    st.session_state.sim_draft_queue = []
+if 'sim_selected_player' not in st.session_state:
+    st.session_state.sim_selected_player = None
+if 'sim_table_key_counter' not in st.session_state:
+    st.session_state.sim_table_key_counter = 0
+
 # Auto-cleanup: remove unavailable players from the draft queue
 if st.session_state.draft_queue:
     available_pids = set(
@@ -37,6 +45,16 @@ if st.session_state.draft_queue:
     )
     st.session_state.draft_queue = [
         p for p in st.session_state.draft_queue if p['PlayerId'] in available_pids
+    ]
+
+# Auto-cleanup: remove unavailable players from the simulator draft queue
+if st.session_state.sim_draft_queue and 'simulator' in st.session_state:
+    sim_available_pids = set(
+        st.session_state.simulator.engine.bat_df[st.session_state.simulator.engine.bat_df['Status'] == 'Available']['PlayerId'].tolist() +
+        st.session_state.simulator.engine.pitch_df[st.session_state.simulator.engine.pitch_df['Status'] == 'Available']['PlayerId'].tolist()
+    )
+    st.session_state.sim_draft_queue = [
+        p for p in st.session_state.sim_draft_queue if p['PlayerId'] in sim_available_pids
     ]
 
 # --- TABS ---
@@ -921,6 +939,9 @@ Team Alpha,4,hitting""", language="csv")
                 )
                 st.session_state.simulator = simulator
                 st.session_state.simulation_started = True
+                st.session_state.sim_draft_queue = []
+                st.session_state.sim_selected_player = None
+                st.session_state.sim_table_key_counter = 0
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Error starting simulation: {str(e)}")
@@ -928,98 +949,217 @@ Team Alpha,4,hitting""", language="csv")
         # --- SIMULATION SECTION ---
         if 'simulation_started' in st.session_state and st.session_state.simulation_started:
             simulator = st.session_state.simulator
-            
+
+            # Pre-compute sim_selected_player from table selection state
+            _sim_view_pre = st.session_state.get('sim_view_option', 'Batters')
+            if _sim_view_pre == 'Batters':
+                _sim_df_pre = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available'].copy()
+                _sim_pre_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA',
+                                 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+            else:
+                _sim_df_pre = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
+                _sim_pre_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS',
+                                 'K/9', 'WAR', 'ADP', 'Dollars']
+            _sim_pre_cols = [c for c in _sim_pre_cols if c in _sim_df_pre.columns]
+            _sim_pos_pre = st.session_state.get('sim_pos_filter', 'All')
+            if _sim_pos_pre and _sim_pos_pre != 'All':
+                _sim_df_pre = _sim_df_pre[_sim_df_pre['POS'].fillna('').apply(
+                    lambda x: _sim_pos_pre in [p.strip() for p in str(x).split('/')])]
+            _sim_sort_by_pre = st.session_state.get('sim_sort_by', 'Dollars')
+            _sim_sort_order_pre = st.session_state.get('sim_sort_order', 'Descending')
+            if _sim_sort_by_pre and _sim_sort_by_pre in _sim_df_pre.columns:
+                _sim_df_pre = _sim_df_pre.sort_values(
+                    by=_sim_sort_by_pre, ascending=(_sim_sort_order_pre == 'Ascending'), na_position='last')
+            _sim_tbl_key = f"sim_available_players_table_{st.session_state.sim_table_key_counter}"
+            _sim_tbl_state = st.session_state.get(_sim_tbl_key)
+            if _sim_tbl_state is not None and hasattr(_sim_tbl_state, 'selection') and _sim_tbl_state.selection.rows:
+                _sim_ridx = _sim_tbl_state.selection.rows[0]
+                if _sim_ridx < len(_sim_df_pre):
+                    _sim_r = _sim_df_pre.iloc[_sim_ridx]
+                    _sim_dollars = _sim_r.get('Dollars') if 'Dollars' in _sim_df_pre.columns else None
+                    st.session_state.sim_selected_player = {
+                        'PlayerId': _sim_r['PlayerId'],
+                        'Name': _sim_r['Name'],
+                        'POS': _sim_r['POS'],
+                        'is_pitcher': (_sim_view_pre == 'Pitchers'),
+                        'Dollars': float(_sim_dollars) if _sim_dollars is not None and not pd.isna(_sim_dollars) else None,
+                    }
+                else:
+                    st.session_state.sim_selected_player = None
+            elif _sim_tbl_state is not None:
+                st.session_state.sim_selected_player = None
+
             st.divider()
             st.subheader("🎯 Simulation Progress")
-            
+
             # Run simulation until user's turn or completion
             if not simulator.simulation_complete and not simulator.is_paused:
                 new_picks = simulator.simulate_until_user_or_complete()
-            
+
             # Show current pick status
             if simulator.simulation_complete:
                 st.success("🎉 Simulation Complete!")
             elif simulator.is_user_turn():
-                st.info("🎯 **YOUR PICK!** Select a player below.")
+                st.info("🎯 **YOUR PICK!** Click a player row below to select, then draft.")
             else:
                 st.info(f"Pick {simulator.current_pick_index + 1} / {len(simulator.draft_order)}")
-            
-            # --- USER PICK INTERFACE ---
-            if simulator.is_user_turn() and not simulator.simulation_complete:
-                st.markdown("---")
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    # Get available players
-                    avail_bat = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available']
-                    avail_pitch = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available']
-                    
-                    search_options = {}
-                    
-                    for _, row in avail_bat.iterrows():
-                        label = f"{row['Name']} ({row['POS']}) - ${row.get('Dollars', 0):.0f}"
-                        search_options[label] = (row['PlayerId'], False)
-                    
-                    for _, row in avail_pitch.iterrows():
-                        label = f"{row['Name']} (P) - ${row.get('Dollars', 0):.0f}"
-                        search_options[label] = (row['PlayerId'], True)
-                    
-                    selected_player_label = st.selectbox(
-                        "Select Your Player",
-                        options=list(search_options.keys()),
-                        key="sim_player_select"
-                    )
-                
-                with col2:
-                    st.write("")
-                    st.write("")
-                    if st.button("✅ Confirm Pick", type="primary", width="stretch"):
-                        pid, is_pitcher = search_options[selected_player_label]
-                        if simulator.make_user_pick(pid, is_pitcher):
-                            st.success("Pick confirmed!")
-                            st.rerun()
-                        else:
-                            st.error("Failed to process pick")
-            
-            # --- PICK LOG ---
-            st.divider()
-            st.subheader("📜 Pick Log")
-            
-            if simulator.pick_log:
-                # Display recent picks (last 10)
-                recent_picks = simulator.pick_log[-10:]
-                
-                for pick in reversed(recent_picks):
-                    col1, col2, col3, col4 = st.columns([1, 2, 3, 4])
-                    
-                    with col1:
-                        st.text(f"#{pick['pick_number']}")
-                    
-                    with col2:
-                        st.text(pick['team_name'])
-                    
-                    with col3:
+
+            # Top Row: Standings and Pick Log
+            sim_top_col1, sim_top_col2 = st.columns([2, 1])
+
+            with sim_top_col1:
+                st.header("📊 Current Standings")
+                standings = simulator.get_standings()
+                st.dataframe(standings, hide_index=True, width="stretch")
+
+            with sim_top_col2:
+                st.header("📜 Pick Log")
+                if simulator.pick_log:
+                    recent_picks = simulator.pick_log[-10:]
+                    for pick in reversed(recent_picks):
                         player_type = "⚾" if not pick['is_pitcher'] else "🥎"
-                        st.text(f"{player_type} {pick['player_name']} ({pick['position']})")
-                    
-                    with col4:
-                        st.caption(pick['rationale'])
-                
-                # Show all picks in expander
-                if len(simulator.pick_log) > 10:
-                    with st.expander(f"📋 View All {len(simulator.pick_log)} Picks"):
-                        for pick in reversed(simulator.pick_log):
-                            st.text(f"#{pick['pick_number']}: {pick['team_name']} - {pick['player_name']} ({pick['position']}) - {pick['rationale']}")
-            else:
-                st.info("No picks yet. Click 'Run Simulation' to start.")
-            
-            # --- STANDINGS ---
+                        st.text(f"#{pick['pick_number']}: {pick['team_name']} — {player_type} {pick['player_name']} ({pick['position']})")
+                    if len(simulator.pick_log) > 10:
+                        with st.expander(f"📋 View All {len(simulator.pick_log)} Picks"):
+                            for pick in reversed(simulator.pick_log):
+                                st.text(f"#{pick['pick_number']}: {pick['team_name']} - {pick['player_name']} ({pick['position']}) - {pick['rationale']}")
+                else:
+                    st.info("No picks yet.")
+
+            # Available Players section with action panel to the left
             st.divider()
-            st.subheader("📊 Current Standings")
-            
-            standings = simulator.get_standings()
-            st.dataframe(standings, hide_index=True, width="stretch")
-            
+            st.subheader("Top Available Players")
+
+            if 'sim_view_option' not in st.session_state:
+                st.session_state.sim_view_option = "Batters"
+
+            sim_view_option = st.radio("View", ["Batters", "Pitchers"], horizontal=True, key="sim_view_option")
+
+            if sim_view_option == "Batters":
+                sim_df_show = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available'].copy()
+                sim_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+                sim_all_positions = set()
+                for pos in sim_df_show['POS'].dropna().unique():
+                    for p in str(pos).split('/'):
+                        sim_all_positions.add(p.strip())
+                sim_all_positions = sorted(sim_all_positions)
+            else:
+                sim_df_show = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
+                sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
+                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
+                sim_all_positions = sorted(sim_df_show['POS'].dropna().unique())
+
+            # Position filter and sort controls
+            sim_pos_filter_col, sim_sort_col1, sim_sort_col2 = st.columns([2, 2, 1])
+            with sim_pos_filter_col:
+                sim_pos_filter = st.selectbox("Filter by Position", ["All"] + sim_all_positions, index=0, key="sim_pos_filter")
+            if sim_pos_filter != "All":
+                sim_df_show = sim_df_show[sim_df_show['POS'].fillna('').apply(lambda x: sim_pos_filter in [p.strip() for p in str(x).split('/')])]
+
+            with sim_sort_col1:
+                sim_sort_by = st.selectbox("Sort by", sim_cols, index=sim_cols.index('Dollars') if 'Dollars' in sim_cols else 0, key="sim_sort_by")
+            with sim_sort_col2:
+                sim_sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="sim_sort_order")
+
+            sim_df_show = sim_df_show.sort_values(by=sim_sort_by, ascending=(sim_sort_order == "Ascending"), na_position='last')
+
+            sim_total_players = len(sim_df_show)
+
+            # Side-by-side: action panel (left) + player table (right)
+            sim_action_col, sim_table_col = st.columns([1, 3])
+
+            with sim_action_col:
+                if simulator.is_user_turn() and not simulator.simulation_complete:
+                    st.markdown("#### Make a Pick")
+
+                    # Display selected player (populated by clicking a row in the table)
+                    sim_sel = st.session_state.sim_selected_player
+                    if sim_sel:
+                        st.info(f"**Selected:** {sim_sel['Name']} ({sim_sel['POS']})")
+                    else:
+                        st.caption("Click a player row to select")
+
+                    # Action buttons
+                    sim_draft_btn_col, sim_queue_btn_col = st.columns(2)
+                    with sim_draft_btn_col:
+                        if st.button("⚾ Draft Player", type="primary", disabled=(sim_sel is None), key="sim_draft_btn"):
+                            if simulator.make_user_pick(sim_sel['PlayerId'], sim_sel['is_pitcher']):
+                                st.toast(f"Drafted {sim_sel['Name']}!")
+                                st.session_state.sim_selected_player = None
+                                st.session_state.sim_table_key_counter += 1
+                                st.rerun()
+                            else:
+                                st.error("Failed to process pick")
+                    with sim_queue_btn_col:
+                        if st.button("📋 Add to Queue", disabled=(sim_sel is None), key="sim_queue_btn"):
+                            if not any(q['PlayerId'] == sim_sel['PlayerId'] for q in st.session_state.sim_draft_queue):
+                                st.session_state.sim_draft_queue.append(sim_sel.copy())
+                                st.toast(f"Added {sim_sel['Name']} to queue!")
+                            else:
+                                st.toast(f"{sim_sel['Name']} is already in the queue.")
+
+                    # Draft Queue panel
+                    if st.session_state.sim_draft_queue:
+                        st.divider()
+                        st.subheader("📋 Draft Queue")
+                        sim_top_q = st.session_state.sim_draft_queue[0]
+                        if st.button(f"⚾ Draft #1: {sim_top_q['Name']}", type="secondary", key="sim_draft_q_top"):
+                            if simulator.make_user_pick(sim_top_q['PlayerId'], sim_top_q['is_pitcher']):
+                                st.toast(f"Drafted {sim_top_q['Name']}!")
+                                st.session_state.sim_draft_queue.pop(0)
+                                st.session_state.sim_selected_player = None
+                                st.session_state.sim_table_key_counter += 1
+                                st.rerun()
+                            else:
+                                st.error("Failed to process pick")
+                        for i, qp in enumerate(st.session_state.sim_draft_queue):
+                            dollars_str = f" — ${qp['Dollars']:.0f}" if pd.notna(qp.get('Dollars')) else ""
+                            qc1, qc2, qc3, qc4 = st.columns([4, 1, 1, 1])
+                            with qc1:
+                                st.text(f"{i + 1}. {qp['Name']} ({qp['POS']}){dollars_str}")
+                            with qc2:
+                                if i > 0 and st.button("⬆️", key=f"sim_q_up_{i}"):
+                                    st.session_state.sim_draft_queue[i], st.session_state.sim_draft_queue[i - 1] = \
+                                        st.session_state.sim_draft_queue[i - 1], st.session_state.sim_draft_queue[i]
+                                    st.rerun()
+                            with qc3:
+                                if i < len(st.session_state.sim_draft_queue) - 1 and st.button("⬇️", key=f"sim_q_down_{i}"):
+                                    st.session_state.sim_draft_queue[i], st.session_state.sim_draft_queue[i + 1] = \
+                                        st.session_state.sim_draft_queue[i + 1], st.session_state.sim_draft_queue[i]
+                                    st.rerun()
+                            with qc4:
+                                if st.button("❌", key=f"sim_q_remove_{i}"):
+                                    st.session_state.sim_draft_queue.pop(i)
+                                    st.rerun()
+                elif not simulator.simulation_complete:
+                    st.caption("Waiting for your turn...")
+                    if st.session_state.sim_draft_queue:
+                        st.divider()
+                        st.subheader("📋 Draft Queue")
+                        for i, qp in enumerate(st.session_state.sim_draft_queue):
+                            dollars_str = f" — ${qp['Dollars']:.0f}" if pd.notna(qp.get('Dollars')) else ""
+                            st.text(f"{i + 1}. {qp['Name']} ({qp['POS']}){dollars_str}")
+
+            with sim_table_col:
+                if sim_total_players > 0:
+                    st.caption(f"{sim_total_players} available players")
+                    # Add Queued column to indicate players already in the draft queue
+                    sim_queued_pids = {q['PlayerId'] for q in st.session_state.sim_draft_queue}
+                    sim_df_show['Queued'] = sim_df_show['PlayerId'].apply(lambda pid: '✅' if pid in sim_queued_pids else '')
+                    sim_display_cols = ['Queued'] + sim_cols
+                    st.dataframe(
+                        sim_df_show[sim_display_cols],
+                        hide_index=True,
+                        height=600,
+                        selection_mode="single-row",
+                        on_select="rerun",
+                        key=_sim_tbl_key,
+                    )
+                else:
+                    st.info("No available players found.")
+                    st.session_state.sim_selected_player = None
+
             # --- TEAM ROSTERS ---
             st.divider()
             st.subheader("👥 Team Rosters")
@@ -1098,50 +1238,6 @@ Team Alpha,4,hitting""", language="csv")
                                     hide_index=True,
                                     width="stretch"
                                 )
-            
-            # --- AVAILABLE PLAYER RANKS ---
-            st.divider()
-            st.subheader("Top Available Players")
-            
-            sim_view_option = st.radio("View", ["Batters", "Pitchers"], horizontal=True, key="sim_view_option")
-            
-            if sim_view_option == "Batters":
-                sim_df_show = simulator.engine.bat_df[simulator.engine.bat_df['Status'] == 'Available'].copy()
-                sim_cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
-                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
-                sim_all_positions = set()
-                for pos in sim_df_show['POS'].dropna().unique():
-                    for p in str(pos).split('/'):
-                        sim_all_positions.add(p.strip())
-                sim_all_positions = sorted(sim_all_positions)
-            else:
-                sim_df_show = simulator.engine.pitch_df[simulator.engine.pitch_df['Status'] == 'Available'].copy()
-                sim_cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
-                sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
-                sim_all_positions = sorted(sim_df_show['POS'].dropna().unique())
-            
-            # Position filter
-            sim_pos_filter_col, sim_sort_col1, sim_sort_col2 = st.columns([2, 2, 1])
-            with sim_pos_filter_col:
-                sim_pos_filter = st.selectbox("Filter by Position", ["All"] + sim_all_positions, index=0, key="sim_pos_filter")
-            if sim_pos_filter != "All":
-                sim_df_show = sim_df_show[sim_df_show['POS'].fillna('').apply(lambda x: sim_pos_filter in [p.strip() for p in str(x).split('/')])]
-            
-            # Sort controls for the full player pool
-            with sim_sort_col1:
-                sim_sort_by = st.selectbox("Sort by", sim_cols, index=sim_cols.index('Dollars') if 'Dollars' in sim_cols else 0, key="sim_sort_by")
-            with sim_sort_col2:
-                sim_sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="sim_sort_order")
-            
-            sim_df_show = sim_df_show.sort_values(by=sim_sort_by, ascending=(sim_sort_order == "Ascending"), na_position='last')
-            
-            sim_total_players = len(sim_df_show)
-            
-            if sim_total_players > 0:
-                st.caption(f"{sim_total_players} available players")
-                st.dataframe(sim_df_show[sim_cols], hide_index=True, height=600)
-            else:
-                st.info("No available players found.")
             
             # --- PLAYER VALUE VISUALIZATION ---
             st.divider()
@@ -1228,6 +1324,9 @@ Team Alpha,4,hitting""", language="csv")
                         del st.session_state.simulator
                     if 'simulation_started' in st.session_state:
                         del st.session_state.simulation_started
+                    st.session_state.sim_draft_queue = []
+                    st.session_state.sim_selected_player = None
+                    st.session_state.sim_table_key_counter = 0
                     st.rerun()
     else:
         st.info("👆 Upload a draft order CSV to begin")
