@@ -26,6 +26,8 @@ if 'draft_queue' not in st.session_state:
     st.session_state.draft_queue = []
 if 'selected_player' not in st.session_state:
     st.session_state.selected_player = None
+if 'table_key_counter' not in st.session_state:
+    st.session_state.table_key_counter = 0
 
 # Auto-cleanup: remove unavailable players from the draft queue
 if st.session_state.draft_queue:
@@ -311,7 +313,8 @@ with tab1:
     if _sort_by_pre and _sort_by_pre in _df_pre.columns:
         _df_pre = _df_pre.sort_values(
             by=_sort_by_pre, ascending=(_sort_order_pre == 'Ascending'), na_position='last')
-    _tbl_state = st.session_state.get('available_players_table')
+    _tbl_key = f"available_players_table_{st.session_state.table_key_counter}"
+    _tbl_state = st.session_state.get(_tbl_key)
     if _tbl_state is not None and hasattr(_tbl_state, 'selection') and _tbl_state.selection.rows:
         _ridx = _tbl_state.selection.rows[0]
         if _ridx < len(_df_pre):
@@ -330,22 +333,108 @@ with tab1:
         # Table rendered with no selection
         st.session_state.selected_player = None
 
-    # Top Row: Input and Standings
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.header("Make a Pick")
-        
+    # Top Row: Standings and Undo
+    top_col1, top_col2 = st.columns([2, 1])
+
+    with top_col1:
+        st.header("Live Standings (5x5)")
+        standings = engine.get_standings()
+        st.dataframe(standings, hide_index=True, width="stretch")
+
+    with top_col2:
+        st.header("Undo Pick")
+
+        # Get all drafted players (not keepers)
+        drafted_bat = engine.bat_df[engine.bat_df['Status'] == 'Drafted']
+        drafted_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Drafted']
+
+        # Create a display string: "Name (POS) — Team Name"
+        undo_options = {}  # Map "Display Name" -> player_id
+
+        for _, row in drafted_bat.iterrows():
+            label = f"{row['Name']} ({row['POS']}) — {row['DraftedBy']}"
+            undo_options[label] = row['PlayerId']
+
+        for _, row in drafted_pitch.iterrows():
+            label = f"{row['Name']} (P) — {row['DraftedBy']}"
+            undo_options[label] = row['PlayerId']
+
+        if undo_options:
+            selected_undo_label = st.selectbox("Select Drafted Player to Undo", options=list(undo_options.keys()))
+
+            if st.button("⚠️ Undo Pick", type="secondary"):
+                undo_pid = undo_options[selected_undo_label]
+                if engine.undo_pick(undo_pid):
+                    st.success(f"Undone: {selected_undo_label}")
+                    st.rerun()
+                else:
+                    st.error("Failed to undo pick. Player may be a keeper or not found.")
+        else:
+            st.info("No drafted players to undo.")
+
+    # Available Players section with action panel to the left
+    st.divider()
+    st.subheader("Top Available Players")
+
+    if 'available_players_view' not in st.session_state:
+        st.session_state.available_players_view = "Batters"
+
+    view_options = ["Batters", "Pitchers"]
+    view_option = st.radio("View", view_options, horizontal=True,
+                           index=view_options.index(st.session_state.available_players_view))
+    st.session_state.available_players_view = view_option
+
+    if view_option == "Batters":
+        df_show = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
+        cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
+        # Filter to only columns that exist in the DataFrame
+        cols = [col for col in cols if col in df_show.columns]
+        # Collect unique individual positions from multi-position strings
+        all_positions = set()
+        for pos in df_show['POS'].dropna().unique():
+            for p in str(pos).split('/'):
+                all_positions.add(p.strip())
+        all_positions = sorted(all_positions)
+    else:
+        df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
+        cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
+        # Filter to only columns that exist in the DataFrame
+        cols = [col for col in cols if col in df_show.columns]
+        all_positions = sorted(df_show['POS'].dropna().unique())
+
+    # Position filter and sort controls
+    pos_filter_col, sort_col1, sort_col2 = st.columns([2, 2, 1])
+    with pos_filter_col:
+        pos_filter = st.selectbox("Filter by Position", ["All"] + all_positions, index=0, key="avail_pos_filter")
+    if pos_filter != "All":
+        df_show = df_show[df_show['POS'].fillna('').apply(lambda x: pos_filter in [p.strip() for p in str(x).split('/')])]
+
+    # Sort controls for the full player pool
+    with sort_col1:
+        sort_by = st.selectbox("Sort by", cols, index=cols.index('Dollars') if 'Dollars' in cols else 0, key="avail_sort_by")
+    with sort_col2:
+        sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="avail_sort_order")
+
+    df_show = df_show.sort_values(by=sort_by, ascending=(sort_order == "Ascending"), na_position='last')
+
+    total_players = len(df_show)
+
+    # Side-by-side: action panel (left) + player table (right)
+    action_col, table_col = st.columns([1, 3])
+
+    with action_col:
+        st.markdown("#### Make a Pick")
+
         # 1. Select Team making the pick
         drafting_team = st.selectbox("Drafting Team", list(engine.teams.keys()))
-        
-        # 2. Display selected player (populated by clicking a row in the table below)
+
+        # 2. Display selected player (populated by clicking a row in the table)
         sel = st.session_state.selected_player
         if sel:
             st.info(f"**Selected:** {sel['Name']} ({sel['POS']})")
         else:
-            st.caption("Click a player row below to select")
-        
+            st.caption("Click a player row to select")
+
         # 3. Action buttons
         draft_btn_col, queue_btn_col = st.columns(2)
         with draft_btn_col:
@@ -353,8 +442,7 @@ with tab1:
                 engine.process_pick(sel['PlayerId'], drafting_team, sel['is_pitcher'])
                 st.toast(f"Drafted {sel['Name']} to {drafting_team}!")
                 st.session_state.selected_player = None
-                if 'available_players_table' in st.session_state:
-                    del st.session_state['available_players_table']
+                st.session_state.table_key_counter += 1
                 st.rerun()
         with queue_btn_col:
             if st.button("📋 Add to Queue", disabled=(sel is None)):
@@ -363,7 +451,7 @@ with tab1:
                     st.toast(f"Added {sel['Name']} to queue!")
                 else:
                     st.toast(f"{sel['Name']} is already in the queue.")
-        
+
         # 4. Draft Queue panel
         if st.session_state.draft_queue:
             st.divider()
@@ -374,8 +462,7 @@ with tab1:
                 st.toast(f"Drafted {top['Name']} to {drafting_team}!")
                 st.session_state.draft_queue.pop(0)
                 st.session_state.selected_player = None
-                if 'available_players_table' in st.session_state:
-                    del st.session_state['available_players_table']
+                st.session_state.table_key_counter += 1
                 st.rerun()
             for i, qp in enumerate(st.session_state.draft_queue):
                 dollars_str = f" — ${qp['Dollars']:.0f}" if pd.notna(qp.get('Dollars')) else ""
@@ -397,107 +484,24 @@ with tab1:
                         st.session_state.draft_queue.pop(i)
                         st.rerun()
 
-        # --- UNDO PICK SECTION ---
-        st.divider()
-        st.header("Undo Pick")
-        
-        # Get all drafted players (not keepers)
-        drafted_bat = engine.bat_df[engine.bat_df['Status'] == 'Drafted']
-        drafted_pitch = engine.pitch_df[engine.pitch_df['Status'] == 'Drafted']
-        
-        # Create a display string: "Name (POS) — Team Name"
-        undo_options = {}  # Map "Display Name" -> player_id
-        
-        for _, row in drafted_bat.iterrows():
-            label = f"{row['Name']} ({row['POS']}) — {row['DraftedBy']}"
-            undo_options[label] = row['PlayerId']
-        
-        for _, row in drafted_pitch.iterrows():
-            label = f"{row['Name']} (P) — {row['DraftedBy']}"
-            undo_options[label] = row['PlayerId']
-        
-        if undo_options:
-            selected_undo_label = st.selectbox("Select Drafted Player to Undo", options=list(undo_options.keys()))
-            
-            if st.button("⚠️ Undo Pick", type="secondary"):
-                undo_pid = undo_options[selected_undo_label]
-                if engine.undo_pick(undo_pid):
-                    st.success(f"Undone: {selected_undo_label}")
-                    st.rerun()
-                else:
-                    st.error("Failed to undo pick. Player may be a keeper or not found.")
+    with table_col:
+        if total_players > 0:
+            st.caption(f"{total_players} available players")
+            # Add Queued column to indicate players already in the draft queue
+            queued_pids = {q['PlayerId'] for q in st.session_state.draft_queue}
+            df_show['Queued'] = df_show['PlayerId'].apply(lambda pid: '✅' if pid in queued_pids else '')
+            display_cols = ['Queued'] + cols
+            st.dataframe(
+                df_show[display_cols],
+                hide_index=True,
+                height=600,
+                selection_mode="single-row",
+                on_select="rerun",
+                key=_tbl_key,
+            )
         else:
-            st.info("No drafted players to undo.")
-
-    with col2:
-        st.header("Live Standings (5x5)")
-        standings = engine.get_standings()
-        st.dataframe(standings, hide_index=True, width="stretch")
-
-    # Bottom Row: Available Players List
-    st.divider()
-    st.subheader("Top Available Players")
-    
-    if 'available_players_view' not in st.session_state:
-        st.session_state.available_players_view = "Batters"
-
-    view_options = ["Batters", "Pitchers"]
-    view_option = st.radio("View", view_options, horizontal=True,
-                           index=view_options.index(st.session_state.available_players_view))
-    st.session_state.available_players_view = view_option
-    
-    if view_option == "Batters":
-        df_show = engine.bat_df[engine.bat_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'POS', 'Team', 'R', 'HR', 'RBI', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'ADP', 'Dollars']
-        # Filter to only columns that exist in the DataFrame
-        cols = [col for col in cols if col in df_show.columns]
-        # Collect unique individual positions from multi-position strings
-        all_positions = set()
-        for pos in df_show['POS'].dropna().unique():
-            for p in str(pos).split('/'):
-                all_positions.add(p.strip())
-        all_positions = sorted(all_positions)
-    else:
-        df_show = engine.pitch_df[engine.pitch_df['Status'] == 'Available'].copy()
-        cols = ['Name', 'POS', 'Team', 'IP', 'SO', 'ERA', 'WHIP', 'SV', 'QS', 'K/9', 'WAR', 'ADP', 'Dollars']
-        # Filter to only columns that exist in the DataFrame
-        cols = [col for col in cols if col in df_show.columns]
-        all_positions = sorted(df_show['POS'].dropna().unique())
-    
-    # Position filter
-    pos_filter_col, sort_col1, sort_col2 = st.columns([2, 2, 1])
-    with pos_filter_col:
-        pos_filter = st.selectbox("Filter by Position", ["All"] + all_positions, index=0, key="avail_pos_filter")
-    if pos_filter != "All":
-        df_show = df_show[df_show['POS'].fillna('').apply(lambda x: pos_filter in [p.strip() for p in str(x).split('/')])]
-    
-    # Sort controls for the full player pool
-    with sort_col1:
-        sort_by = st.selectbox("Sort by", cols, index=cols.index('Dollars') if 'Dollars' in cols else 0, key="avail_sort_by")
-    with sort_col2:
-        sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="avail_sort_order")
-    
-    df_show = df_show.sort_values(by=sort_by, ascending=(sort_order == "Ascending"), na_position='last')
-    
-    total_players = len(df_show)
-    
-    if total_players > 0:
-        st.caption(f"{total_players} available players")
-        # Add Queued column to indicate players already in the draft queue
-        queued_pids = {q['PlayerId'] for q in st.session_state.draft_queue}
-        df_show['Queued'] = df_show['PlayerId'].apply(lambda pid: '✅' if pid in queued_pids else '')
-        display_cols = ['Queued'] + cols
-        st.dataframe(
-            df_show[display_cols],
-            hide_index=True,
-            height=600,
-            selection_mode="single-row",
-            on_select="rerun",
-            key="available_players_table",
-        )
-    else:
-        st.info("No available players found.")
-        st.session_state.selected_player = None
+            st.info("No available players found.")
+            st.session_state.selected_player = None
 
     # ==========================================
     # SNAPSHOT PROJECTIONS SECTION (tab1)
@@ -631,7 +635,7 @@ with tab1:
                 z=z_values,
                 x=categories,
                 y=teams,
-                colorscale='RdYlGn',
+                colorscale='Viridis',
                 zmin=0.0,
                 zmax=1.0,
                 text=cell_text,
