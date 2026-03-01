@@ -11,6 +11,7 @@ class Player:
     dollars: float
     stats: Dict[str, float]
     is_pitcher: bool
+    is_writein: bool = False
 
 @dataclass
 class Team:

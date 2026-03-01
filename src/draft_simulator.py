@@ -404,20 +404,28 @@ class DraftSimulator:
         self.engine.process_pick(player_id, team_name, is_pitcher)
         
         # Get player info for log
-        if is_pitcher:
-            player_row = self.engine.pitch_df[self.engine.pitch_df['PlayerId'] == player_id].iloc[0]
-        else:
-            player_row = self.engine.bat_df[self.engine.bat_df['PlayerId'] == player_id].iloc[0]
+        try:
+            if is_pitcher:
+                player_row = self.engine.pitch_df[self.engine.pitch_df['PlayerId'] == player_id].iloc[0]
+            else:
+                player_row = self.engine.bat_df[self.engine.bat_df['PlayerId'] == player_id].iloc[0]
+            player_name = player_row['Name']
+            player_pos = player_row['POS']
+            player_dollars = player_row.get('Dollars', 0)
+        except (IndexError, KeyError):
+            player_name = player_id
+            player_pos = 'P' if is_pitcher else '??'
+            player_dollars = 0
         
         # Log the pick
         self.pick_log.append({
             'pick_number': pick_info['pick_number'],
             'team_name': team_name,
-            'player_name': player_row['Name'],
-            'position': player_row['POS'],
+            'player_name': player_name,
+            'position': player_pos,
             'is_pitcher': is_pitcher,
             'rationale': '👤 User Selection',
-            'dollars': player_row.get('Dollars', 0)
+            'dollars': player_dollars
         })
         
         # Move to next pick

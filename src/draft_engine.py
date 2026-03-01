@@ -1,3 +1,5 @@
+import uuid
+
 import pandas as pd
 from .models import Team, Player
 
@@ -161,6 +163,35 @@ class DraftEngine:
         
         self.teams[team_name].add_player(new_player)
 
+    def process_writein(self, name, team_name, is_pitcher, position='', mlb_team='', cost=0.0, status='Drafted'):
+        """Draft or assign a write-in player who is not in the projection DataFrames.
+
+        Args:
+            name: Player name (required).
+            team_name: Team to assign the player to.
+            is_pitcher: Whether the player is a pitcher.
+            position: Position string (e.g. 'SS', 'SP'). Defaults to ''.
+            mlb_team: MLB team abbreviation. Defaults to ''.
+            cost: Dollar value / keeper cost. Defaults to 0.0.
+            status: 'Drafted' or 'Keeper'. Defaults to 'Drafted'.
+
+        Returns:
+            The generated player_id string (``WRITEIN-<uuid>``).
+        """
+        player_id = f"WRITEIN-{uuid.uuid4().hex[:8]}"
+        new_player = Player(
+            player_id=player_id,
+            name=name,
+            position=position if position else ('P' if is_pitcher else ''),
+            team_mlb=mlb_team,
+            dollars=cost,
+            stats={},
+            is_pitcher=is_pitcher,
+            is_writein=True,
+        )
+        self.teams[team_name].add_player(new_player, is_keeper=(status == 'Keeper'))
+        return player_id
+
     # Stats keys needed for incremental live_totals in Team.add_player
     _BAT_STAT_KEYS = ('R', 'HR', 'RBI', 'SB', 'AB', 'OBP')
     _PITCH_STAT_KEYS = ('SO', 'SV', 'QS', 'IP', 'ERA', 'WHIP')
@@ -223,6 +254,13 @@ class DraftEngine:
         Returns:
             True if the pick was successfully undone, False otherwise
         """
+        # Handle write-in players (not in DataFrames)
+        if str(player_id).startswith('WRITEIN-'):
+            for team_name, team in self.teams.items():
+                if team.remove_player(player_id):
+                    return True
+            return False
+
         # Determine if player is a batter or pitcher and check if they're drafted
         df = None
         is_pitcher = None
@@ -276,7 +314,8 @@ class DraftEngine:
         data = []
         for name, team in self.teams.items():
             totals = team.live_totals
-            totals['Team'] = name
+            has_writeins = any(p.is_writein for p in team.roster)
+            totals['Team'] = f"⚠️ {name}" if has_writeins else name
             data.append(totals)
         
         df = pd.DataFrame(data)
@@ -305,9 +344,10 @@ class DraftEngine:
             # Handle NaN/None values for display
             pos = player.position if not pd.isna(player.position) else 'Unknown'
             mlb_team = player.team_mlb if not pd.isna(player.team_mlb) else 'N/A'
+            display_name = f"✏️ {player.name}" if player.is_writein else player.name
             
             roster_data.append({
-                'Name': player.name,
+                'Name': display_name,
                 'POS': pos,
                 'MLB Team': mlb_team,
                 'Type': 'Pitcher' if player.is_pitcher else 'Batter',
@@ -348,6 +388,7 @@ class DraftEngine:
             else:
                 possible_pos = [p.strip() for p in str(pos).split('/')]
 
+            display_name = f"✏️ {player.name}" if player.is_writein else player.name
             assigned = False
 
             if not player.is_pitcher:
@@ -355,35 +396,35 @@ class DraftEngine:
                     if p in slot_limits and filled[p] < slot_limits[p]:
                         filled[p] += 1
                         label = f"{p} {filled[p]}" if slot_limits[p] > 1 else p
-                        assignments[label] = player.name
+                        assignments[label] = display_name
                         assigned = True
                         break
                 if not assigned and filled['Util'] < slot_limits['Util']:
                     filled['Util'] += 1
                     label = f"Util {filled['Util']}" if slot_limits['Util'] > 1 else 'Util'
-                    assignments[label] = player.name
+                    assignments[label] = display_name
                     assigned = True
             else:
                 if 'SP' in possible_pos and filled['SP'] < slot_limits['SP']:
                     filled['SP'] += 1
                     label = f"SP {filled['SP']}" if slot_limits['SP'] > 1 else 'SP'
-                    assignments[label] = player.name
+                    assignments[label] = display_name
                     assigned = True
                 elif 'RP' in possible_pos and filled['RP'] < slot_limits['RP']:
                     filled['RP'] += 1
                     label = f"RP {filled['RP']}" if slot_limits['RP'] > 1 else 'RP'
-                    assignments[label] = player.name
+                    assignments[label] = display_name
                     assigned = True
                 if not assigned and filled['P'] < slot_limits['P']:
                     filled['P'] += 1
                     label = f"P {filled['P']}" if slot_limits['P'] > 1 else 'P'
-                    assignments[label] = player.name
+                    assignments[label] = display_name
                     assigned = True
 
             if not assigned and filled['BN'] < slot_limits['BN']:
                 filled['BN'] += 1
                 label = f"BN {filled['BN']}"
-                assignments[label] = player.name
+                assignments[label] = display_name
 
         return assignments
 
@@ -433,6 +474,9 @@ class DraftEngine:
         for removed_name in removed_teams:
             removed_team = old_teams[removed_name]
             for player in removed_team.roster:
+                # Write-in players are not in DataFrames — skip them
+                if player.is_writein:
+                    continue
                 # Find player in appropriate DataFrame and reset status
                 # Normalize player_id to match DataFrame type
                 pid = self._normalize_player_id(player.player_id)
@@ -459,6 +503,13 @@ class DraftEngine:
         Returns:
             True if the keeper was successfully removed, False otherwise
         """
+        # Handle write-in keepers (not in DataFrames)
+        if str(player_id).startswith('WRITEIN-'):
+            for team_name, team in self.teams.items():
+                if team.remove_player(player_id):
+                    return True
+            return False
+
         # Find the player and check if they're a keeper
         df = None
         
@@ -538,6 +589,19 @@ class DraftEngine:
         for team_name, team in self.teams.items():
             team_keepers = []
             for player in team.roster:
+                # Write-in keepers are always treated as keepers
+                if player.is_writein:
+                    team_keepers.append({
+                        "player_id": player.player_id,
+                        "cost": player.dollars,
+                        "is_pitcher": player.is_pitcher,
+                        "is_writein": True,
+                        "name": player.name,
+                        "position": player.position,
+                        "team_mlb": player.team_mlb,
+                    })
+                    continue
+
                 # Check if player is a keeper by looking at their status in DataFrame
                 # Normalize player_id to match DataFrame type
                 pid = self._normalize_player_id(player.player_id)
@@ -606,7 +670,18 @@ class DraftEngine:
                     is_pitcher = keeper_data.get("is_pitcher", None)
                     
                     if player_id:
-                        self.process_keeper(player_id, team_name, cost, is_pitcher=is_pitcher)
+                        if keeper_data.get("is_writein"):
+                            self.process_writein(
+                                name=keeper_data.get("name", "Unknown"),
+                                team_name=team_name,
+                                is_pitcher=bool(is_pitcher),
+                                position=keeper_data.get("position", ""),
+                                mlb_team=keeper_data.get("team_mlb", ""),
+                                cost=cost,
+                                status='Keeper',
+                            )
+                        else:
+                            self.process_keeper(player_id, team_name, cost, is_pitcher=is_pitcher)
             
             return True
             
