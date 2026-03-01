@@ -13,5 +13,5 @@ history/*/
 profiles/*/
 !profiles/.gitkeep
 
-# Test scripts
-test_*.py
+# Test scripts in root (not the tests/ directory)
+/test_*.py
