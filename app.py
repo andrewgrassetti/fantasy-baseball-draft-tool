@@ -166,6 +166,36 @@ with tab0:
                     st.error("Failed to add keeper")
         else:
             st.info("All players have been assigned. No available players remaining.")
+
+        # --- Write-in Keeper ---
+        st.divider()
+        st.markdown("**✏️ Write-in Keeper** (player not in projections)")
+        wi_keeper_name = st.text_input("Player Name", key="wi_keeper_name")
+        wi_col1, wi_col2 = st.columns(2)
+        with wi_col1:
+            wi_keeper_pos = st.text_input("Position (e.g. SS, SP)", key="wi_keeper_pos")
+        with wi_col2:
+            wi_keeper_mlb = st.text_input("MLB Team", key="wi_keeper_mlb")
+        wi_col3, wi_col4 = st.columns(2)
+        with wi_col3:
+            wi_keeper_type = st.radio("Player Type", ["Batter", "Pitcher"], horizontal=True, key="wi_keeper_type")
+        with wi_col4:
+            wi_keeper_cost = st.number_input("Keeper Cost ($)", min_value=0.0, max_value=1000.0, value=0.0, step=1.0, key="wi_keeper_cost")
+        if st.button("Add Write-in Keeper", type="secondary"):
+            if not wi_keeper_name.strip():
+                st.error("Player name is required")
+            else:
+                engine.process_writein(
+                    name=wi_keeper_name.strip(),
+                    team_name=keeper_team,
+                    is_pitcher=(wi_keeper_type == "Pitcher"),
+                    position=wi_keeper_pos.strip(),
+                    mlb_team=wi_keeper_mlb.strip(),
+                    cost=wi_keeper_cost,
+                    status='Keeper',
+                )
+                st.success(f"Added write-in keeper {wi_keeper_name.strip()} to {keeper_team}")
+                st.rerun()
     
     with col2:
         st.markdown("**Current Keepers**")
@@ -174,6 +204,17 @@ with tab0:
         all_keepers = []
         for team_name, team in engine.teams.items():
             for player in team.roster:
+                # Write-in players are always considered keepers
+                if player.is_writein:
+                    all_keepers.append({
+                        'Team': team_name,
+                        'Player': f"✏️ {player.name}",
+                        'Position': player.position,
+                        'Cost': player.dollars,
+                        'ID': player.player_id,
+                        'is_pitcher': player.is_pitcher
+                    })
+                    continue
                 # Check if player is a keeper
                 if player.is_pitcher:
                     mask = engine.pitch_df['PlayerId'] == player.player_id
@@ -445,6 +486,14 @@ with tab1:
             label = f"{row['Name']} (P) — {row['DraftedBy']}"
             undo_options[label] = row['PlayerId']
 
+        # Include write-in drafted players (not in DataFrames)
+        for team_name, team in engine.teams.items():
+            for player in team.roster:
+                if player.is_writein:
+                    pos = player.position or ('P' if player.is_pitcher else '??')
+                    label = f"✏️ {player.name} ({pos}) — {team_name}"
+                    undo_options[label] = player.player_id
+
         if undo_options:
             selected_undo_label = st.selectbox("Select Drafted Player to Undo", options=list(undo_options.keys()))
 
@@ -595,6 +644,34 @@ with tab1:
                     if st.button("❌", key=f"q_remove_{i}"):
                         st.session_state.draft_queue.pop(i)
                         st.rerun()
+
+        # 5. Write-in Player
+        st.divider()
+        st.markdown("#### ✏️ Write-in Player")
+        wi_name = st.text_input("Player Name", key="wi_draft_name")
+        wi_d1, wi_d2 = st.columns(2)
+        with wi_d1:
+            wi_pos = st.text_input("Position", key="wi_draft_pos")
+        with wi_d2:
+            wi_mlb = st.text_input("MLB Team", key="wi_draft_mlb")
+        wi_type = st.radio("Type", ["Batter", "Pitcher"], horizontal=True, key="wi_draft_type")
+        if st.button("⚾ Draft Write-in", type="secondary"):
+            if not wi_name.strip():
+                st.error("Player name is required")
+            else:
+                engine.process_writein(
+                    name=wi_name.strip(),
+                    team_name=drafting_team,
+                    is_pitcher=(wi_type == "Pitcher"),
+                    position=wi_pos.strip(),
+                    mlb_team=wi_mlb.strip(),
+                    status='Drafted',
+                )
+                st.toast(f"Drafted write-in {wi_name.strip()} to {drafting_team}!")
+                st.session_state.selected_player = None
+                st.session_state.table_key_counter += 1
+                st.session_state.pop('snapshot_availability', None)
+                st.rerun()
 
     with table_col:
         if total_players > 0:
