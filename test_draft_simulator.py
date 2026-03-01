@@ -625,6 +625,269 @@ def test_snapshot_no_availability_without_user():
     return passed
 
 
+def _make_draft_order_csv_2col(team_names, num_rounds=1):
+    """Create a 2-column draft order CSV string (no tendency column)."""
+    lines = ['player_name,pick_number']
+    pick = 1
+    for _ in range(num_rounds):
+        for name in team_names:
+            lines.append(f'{name},{pick}')
+            pick += 1
+    return '\n'.join(lines)
+
+
+def test_profile_driven_tendency_scoring():
+    """Teams with profiles should use continuous tendency scoring.
+
+    A team with tendency=0.5 (pitching-leaning) should score pitchers higher
+    than batters.  A team with tendency=-0.5 (hitting-leaning) should score
+    batters higher than pitchers.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Profile-driven tendency scoring")
+    print("=" * 60)
+
+    bat_dollars = [50]
+    pitch_dollars = [50]
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Profile_Team', 'Other_Team']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=1)
+
+    # Pitching-leaning profile
+    pitching_profiles = {
+        'Profile_Team': {'tendency': 0.5, 'chaos_score': 5, 'chaos_raw': 0.5}
+    }
+    sim = DraftSimulator(engine, csv, user_team_name='Other_Team',
+                         random_seed=42, team_profiles=pitching_profiles)
+
+    pitcher_score = sim._calculate_tendency_score('balanced', True, team_name='Profile_Team')
+    batter_score = sim._calculate_tendency_score('balanced', False, team_name='Profile_Team')
+
+    print(f"  Pitching-leaning (tendency=0.5): pitcher={pitcher_score:.1f}, batter={batter_score:.1f}")
+
+    passed = True
+    if not (pitcher_score > batter_score):
+        print("  ❌ FAILED: Pitcher should score higher for pitching-leaning team")
+        passed = False
+
+    # Hitting-leaning profile
+    hitting_profiles = {
+        'Profile_Team': {'tendency': -0.5, 'chaos_score': 5, 'chaos_raw': 0.5}
+    }
+    sim2 = DraftSimulator(engine, csv, user_team_name='Other_Team',
+                          random_seed=42, team_profiles=hitting_profiles)
+
+    pitcher_score2 = sim2._calculate_tendency_score('balanced', True, team_name='Profile_Team')
+    batter_score2 = sim2._calculate_tendency_score('balanced', False, team_name='Profile_Team')
+
+    print(f"  Hitting-leaning (tendency=-0.5): pitcher={pitcher_score2:.1f}, batter={batter_score2:.1f}")
+
+    if not (batter_score2 > pitcher_score2):
+        print("  ❌ FAILED: Batter should score higher for hitting-leaning team")
+        passed = False
+
+    # Verify no profile falls back to old behavior
+    no_profile_score = sim._calculate_tendency_score('hitting', False, team_name='No_Profile_Team')
+    print(f"  No profile, hitting+batter: {no_profile_score:.1f}")
+    if no_profile_score != 50.0:
+        print("  ❌ FAILED: No-profile fallback should return 50.0 for hitting+batter")
+        passed = False
+
+    if passed:
+        print("  ✅ PASSED: Profile-driven tendency scoring works correctly")
+    else:
+        print("  ❌ FAILED")
+    return passed
+
+
+def test_chaos_score_affects_randomness():
+    """Chaos score should affect pick randomness via the score exponent.
+
+    With chaos_score=1 (predictable), the top player should be picked very
+    frequently.  With chaos_score=10 (chaotic), the top player should be
+    picked less frequently.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: Chaos score affects pick randomness")
+    print("=" * 60)
+
+    bat_dollars = [131, 91, 71, 56, 41, 31, 21, 11, 1]
+    pitch_dollars = [111, 81, 61, 51, 36, 26, 16, 6]
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['AI_Team_1', 'AI_Team_2']
+
+    num_trials = 200
+
+    # Test with chaos_score=1 (predictable)
+    predictable_profiles = {
+        'AI_Team_1': {'tendency': 0.0, 'chaos_score': 1, 'chaos_raw': 0.0}
+    }
+    top_count_predictable = 0
+    for trial in range(num_trials):
+        engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+        csv = _make_draft_order_csv(team_names, num_rounds=1)
+        sim = DraftSimulator(engine, csv, user_team_name='AI_Team_2',
+                             random_seed=trial, team_profiles=predictable_profiles)
+        result = sim.simulate_next_pick()
+        if result and result['player_name'] == 'Batter 0':
+            top_count_predictable += 1
+
+    # Test with chaos_score=10 (chaotic)
+    chaotic_profiles = {
+        'AI_Team_1': {'tendency': 0.0, 'chaos_score': 10, 'chaos_raw': 1.0}
+    }
+    top_count_chaotic = 0
+    for trial in range(num_trials):
+        engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+        csv = _make_draft_order_csv(team_names, num_rounds=1)
+        sim = DraftSimulator(engine, csv, user_team_name='AI_Team_2',
+                             random_seed=trial, team_profiles=chaotic_profiles)
+        result = sim.simulate_next_pick()
+        if result and result['player_name'] == 'Batter 0':
+            top_count_chaotic += 1
+
+    pct_predictable = top_count_predictable / num_trials * 100
+    pct_chaotic = top_count_chaotic / num_trials * 100
+
+    print(f"  Predictable (chaos=1): top player picked {pct_predictable:.1f}%")
+    print(f"  Chaotic (chaos=10): top player picked {pct_chaotic:.1f}%")
+    print(f"  Difference: {pct_predictable - pct_chaotic:.1f}pp")
+
+    passed = pct_predictable > pct_chaotic
+    if passed:
+        print("  ✅ PASSED: Chaos score affects pick randomness")
+    else:
+        print("  ❌ FAILED: Predictable team should pick top player more often than chaotic")
+    return passed
+
+
+def test_backward_compat_old_csv_format():
+    """A 3-column CSV with tendency column should still work exactly as before."""
+    print("\n" + "=" * 60)
+    print("TEST: Backward compatibility with old CSV format")
+    print("=" * 60)
+
+    bat_dollars = [50, 30]
+    pitch_dollars = [40]
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Team_A', 'Team_B']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+
+    # Old 3-column format
+    csv_3col = _make_draft_order_csv(team_names, num_rounds=1)
+
+    passed = True
+    try:
+        sim = DraftSimulator(engine, csv_3col, user_team_name='Team_B', random_seed=0)
+        result = sim.simulate_next_pick()
+        if result is None:
+            print("  ❌ FAILED: simulate_next_pick returned None")
+            passed = False
+        else:
+            print(f"  Pick made: {result['player_name']}")
+    except Exception as e:
+        print(f"  ❌ FAILED: Exception with old format: {e}")
+        passed = False
+
+    if passed:
+        print("  ✅ PASSED: Old 3-column CSV format still works")
+    else:
+        print("  ❌ FAILED")
+    return passed
+
+
+def test_new_2col_csv_format():
+    """A 2-column CSV without tendency column should be accepted."""
+    print("\n" + "=" * 60)
+    print("TEST: New 2-column CSV format works")
+    print("=" * 60)
+
+    bat_dollars = [50, 30]
+    pitch_dollars = [40]
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Team_A', 'Team_B']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+
+    # New 2-column format
+    csv_2col = _make_draft_order_csv_2col(team_names, num_rounds=1)
+
+    passed = True
+    try:
+        sim = DraftSimulator(engine, csv_2col, user_team_name='Team_B', random_seed=0)
+        # Verify tendency defaults to 'balanced'
+        pick_info = sim.get_current_pick_info()
+        if pick_info['tendency'] != 'balanced':
+            print(f"  ❌ FAILED: Default tendency should be 'balanced', got '{pick_info['tendency']}'")
+            passed = False
+        else:
+            print(f"  Default tendency: {pick_info['tendency']}")
+
+        result = sim.simulate_next_pick()
+        if result is None:
+            print("  ❌ FAILED: simulate_next_pick returned None")
+            passed = False
+        else:
+            print(f"  Pick made: {result['player_name']}")
+    except Exception as e:
+        print(f"  ❌ FAILED: Exception with 2-column format: {e}")
+        passed = False
+
+    if passed:
+        print("  ✅ PASSED: New 2-column CSV format works")
+    else:
+        print("  ❌ FAILED")
+    return passed
+
+
+def test_profile_passed_to_snapshot():
+    """run_monte_carlo_snapshot should accept and use team_profiles parameter."""
+    print("\n" + "=" * 60)
+    print("TEST: Profile passed to snapshot")
+    print("=" * 60)
+
+    bat_dollars = [50, 30, 10]
+    pitch_dollars = [40, 20, 5]
+    bat_df, pitch_df = _make_test_data(bat_dollars, pitch_dollars)
+
+    team_names = ['Team_A', 'Team_B']
+    engine = DraftEngine(bat_df, pitch_df, team_names=team_names)
+    csv = _make_draft_order_csv(team_names, num_rounds=3)
+
+    profiles = {
+        'Team_A': {'tendency': 0.3, 'chaos_score': 3, 'chaos_raw': 0.3, 'tendency_label': 'pitching'},
+        'Team_B': {'tendency': -0.2, 'chaos_score': 7, 'chaos_raw': 0.7, 'tendency_label': 'hitting'},
+    }
+
+    passed = True
+    try:
+        result = run_monte_carlo_snapshot(
+            engine=engine,
+            draft_order_csv=csv,
+            n_simulations=10,
+            max_workers=1,
+            team_profiles=profiles,
+        )
+        if 'mean_standings' not in result:
+            print("  ❌ FAILED: No mean_standings in result")
+            passed = False
+        else:
+            print(f"  Snapshot completed with {result['n_simulations']} simulations")
+    except Exception as e:
+        print(f"  ❌ FAILED: Exception with team_profiles: {e}")
+        passed = False
+
+    if passed:
+        print("  ✅ PASSED: Profile passed to snapshot works")
+    else:
+        print("  ❌ FAILED")
+    return passed
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -639,6 +902,11 @@ if __name__ == '__main__':
     t7 = test_catchers_not_overdrafted_in_early_rounds()
     t8 = test_snapshot_availability_probabilities()
     t9 = test_snapshot_no_availability_without_user()
+    t10 = test_profile_driven_tendency_scoring()
+    t11 = test_chaos_score_affects_randomness()
+    t12 = test_backward_compat_old_csv_format()
+    t13 = test_new_2col_csv_format()
+    t14 = test_profile_passed_to_snapshot()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -652,8 +920,14 @@ if __name__ == '__main__':
     print(f"Test 7 (Catchers not overdrafted): {'✅ PASSED' if t7 else '❌ FAILED'}")
     print(f"Test 8 (Snapshot availability probs): {'✅ PASSED' if t8 else '❌ FAILED'}")
     print(f"Test 9 (No availability without user): {'✅ PASSED' if t9 else '❌ FAILED'}")
+    print(f"Test 10 (Profile tendency scoring): {'✅ PASSED' if t10 else '❌ FAILED'}")
+    print(f"Test 11 (Chaos score randomness): {'✅ PASSED' if t11 else '❌ FAILED'}")
+    print(f"Test 12 (Backward compat old CSV): {'✅ PASSED' if t12 else '❌ FAILED'}")
+    print(f"Test 13 (New 2-column CSV): {'✅ PASSED' if t13 else '❌ FAILED'}")
+    print(f"Test 14 (Profile passed to snapshot): {'✅ PASSED' if t14 else '❌ FAILED'}")
 
-    if t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9:
+    all_passed = t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9 and t10 and t11 and t12 and t13 and t14
+    if all_passed:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
     else:
