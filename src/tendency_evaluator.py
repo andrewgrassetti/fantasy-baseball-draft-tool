@@ -140,7 +140,7 @@ def _normalize_chaos_scores(profiles: List[Dict]) -> None:
 
     After individual ``evaluate_team`` calls produce per-team chaos values,
     this function rescales them relative to the group so the full 1–10 range
-    is utilised.  The team with the lowest ``chaos_raw`` receives a score of
+    is utilized.  The team with the lowest ``chaos_raw`` receives a score of
     1 and the team with the highest receives 10.
 
     The list is modified **in place**.
