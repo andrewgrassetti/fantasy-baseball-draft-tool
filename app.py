@@ -410,6 +410,13 @@ with tab1:
     # --- DRAFT ORDER & USER TEAM SETUP ---
     st.subheader("📋 Draft Setup")
 
+    # --- PROFILE STATUS INDICATOR ---
+    _draft_profiles = st.session_state.get('team_profiles')
+    if _draft_profiles:
+        st.success(f"✅ Tendency profiles active — {len(_draft_profiles)} teams loaded from 📊 Player Tendencies")
+    else:
+        st.info("ℹ️ No tendency profiles loaded — using default tendencies. Load profiles in the 📊 Player Tendencies tab.")
+
     _setup_col1, _setup_col2 = st.columns([2, 1])
 
     with _setup_col1:
@@ -1116,23 +1123,9 @@ Team Alpha,4""", language="csv")
     # --- PROFILE STATUS INDICATOR ---
     _sim_profiles = st.session_state.get('team_profiles')
     if _sim_profiles:
-        st.success(f"✅ Tendency profiles loaded for {len(_sim_profiles)} teams")
+        st.success(f"✅ Tendency profiles active — {len(_sim_profiles)} teams loaded from 📊 Player Tendencies")
     else:
-        st.warning("⚠️ No tendency profiles loaded — using default tendencies")
-    if st.button("📂 Load Profiles", key="sim_load_profiles_btn"):
-        try:
-            import json as _sim_json
-            _sim_profiles_path = os.path.join("profiles", "tendencies.json")
-            if os.path.exists(_sim_profiles_path):
-                with open(_sim_profiles_path, 'r') as _sim_pf:
-                    _sim_loaded = _sim_json.load(_sim_pf)
-                _sim_profiles_list = _sim_loaded.get("profiles", [])
-                st.session_state.team_profiles = {p["team_name"]: p for p in _sim_profiles_list}
-                st.rerun()
-            else:
-                st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
-        except Exception as _sim_load_err:
-            st.error(f"❌ Error loading profiles: {_sim_load_err}")
+        st.info("ℹ️ No tendency profiles loaded — using default tendencies. Load profiles in the 📊 Player Tendencies tab.")
 
     st.divider()
 
@@ -1613,8 +1606,8 @@ with tab5:
 
 1. **Upload historical draft CSVs** — Upload one or more past draft result files and assign each a year.
 2. **Run the Evaluator** — Select the years to analyze and click **Run Evaluation** to generate tendency and chaos scores.
-3. **Save Profiles** — After evaluation, click **Save Profiles** to write results to `profiles/tendencies.json`.
-4. **Load Profiles** — Click **Load Profiles** here or on the **🎲 Draft Simulator** tab to activate profiles for your session.
+3. **Save Profiles** — After evaluation, click **Save Profiles** to write results to `profiles/tendencies.json`. Profiles are automatically activated across all tabs.
+4. **Load Profiles** — Or click **Load Profiles** to load previously saved profiles from disk.
 """)
 
     # --- Section 1: Upload Historical Drafts ---
@@ -1699,7 +1692,8 @@ with tab5:
             try:
                 from src.tendency_evaluator import save_profiles
                 save_profiles(_prev_results)
-                st.success("✅ Profiles saved to profiles/tendencies.json")
+                st.session_state.team_profiles = {p["team_name"]: p for p in _prev_results}
+                st.success("✅ Profiles saved and activated across all tabs.")
             except Exception as _save_err:
                 st.error(f"❌ Error saving profiles: {_save_err}")
 
@@ -1760,4 +1754,4 @@ with tab5:
                 'Chaos Score': profile.get('chaos_score', '?'),
             })
         st.dataframe(pd.DataFrame(_profile_rows), hide_index=True)
-        st.caption("These profiles are now active and will be used by the Draft Simulator and Snapshot Projections.")
+        st.caption("These profiles are now active across all tabs — ⚾ Draft Room, 🎲 Draft Simulator, and Snapshot Projections.")
