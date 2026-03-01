@@ -225,3 +225,46 @@ class TestSetTeamNamesWritein:
         engine.set_team_names(["B", "C"])
         assert "A" not in engine.teams
         assert "C" in engine.teams
+
+
+# ---------------------------------------------------------------------------
+# Duplicate keeper prevention
+# ---------------------------------------------------------------------------
+
+class TestDuplicateKeeperPrevention:
+    def test_process_keeper_twice_does_not_duplicate(self):
+        engine = _make_engine()
+        engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
+        engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
+        roster = engine.teams["Alpha"].roster
+        assert len(roster) == 1
+
+    def test_process_keeper_twice_returns_true(self):
+        engine = _make_engine()
+        result1 = engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
+        result2 = engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
+        assert result1 is True
+        assert result2 is True
+
+    def test_import_config_with_duplicate_entries(self):
+        engine = _make_engine()
+        config = {
+            "team_names": ["Alpha", "Beta"],
+            "keepers": {
+                "Alpha": [
+                    {"player_id": "b1", "cost": 10.0, "is_pitcher": False},
+                    {"player_id": "b1", "cost": 10.0, "is_pitcher": False},
+                ]
+            }
+        }
+        engine.import_keeper_config(config)
+        roster = engine.teams["Alpha"].roster
+        assert len(roster) == 1
+
+    def test_same_player_different_teams_allowed(self):
+        """Same player can be a keeper on different teams (unusual but key-safe)."""
+        engine = _make_engine()
+        engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
+        engine.process_keeper("b1", "Beta", cost=10.0, is_pitcher=False)
+        assert len(engine.teams["Alpha"].roster) == 1
+        assert len(engine.teams["Beta"].roster) == 1

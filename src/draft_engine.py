@@ -116,10 +116,17 @@ class DraftEngine:
             else:
                 return False # Player not found
 
+        # Check if player is already on this team's roster (prevent duplicates)
+        pid_str = str(row['PlayerId'])
+        team = self.teams[team_name]
+        for existing in team.roster:
+            if existing.player_id == pid_str and existing.is_pitcher == determined_is_pitcher:
+                return True  # Already a keeper on this team
+
         # Create Player Object
         stats = row.to_dict()
         new_player = Player(
-            player_id=str(row['PlayerId']),
+            player_id=pid_str,
             name=row['Name'],
             position=row['POS'],
             team_mlb=row['Team'],
@@ -129,7 +136,7 @@ class DraftEngine:
         )
         
         # Add to Team (Mark as keeper)
-        self.teams[team_name].add_player(new_player, is_keeper=True)
+        team.add_player(new_player, is_keeper=True)
         return True
     
     def process_pick(self, player_id, team_name, is_pitcher):
