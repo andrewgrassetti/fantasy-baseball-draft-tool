@@ -1754,4 +1754,4 @@ with tab5:
                 'Chaos Score': profile.get('chaos_score', '?'),
             })
         st.dataframe(pd.DataFrame(_profile_rows), hide_index=True)
-        st.caption("These profiles are now active across all tabs — ⚾ Draft Room, 🎲 Draft Simulator, and Snapshot Projections.")
+        st.caption("These profiles are now active across all tabs — the ⚾ Draft Room, the 🎲 Draft Simulator, and Snapshot Projections.")
