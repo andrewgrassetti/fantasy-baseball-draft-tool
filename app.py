@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import time
 import os
+import random
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
 from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
@@ -41,6 +42,8 @@ if 'sim_table_key_counter' not in st.session_state:
     st.session_state.sim_table_key_counter = 0
 if 'sim_new_picks' not in st.session_state:
     st.session_state.sim_new_picks = []
+if 'sim_random_seed' not in st.session_state:
+    st.session_state.sim_random_seed = random.randint(1, 10000)
 
 # Auto-cleanup: remove unavailable players from the draft queue
 if st.session_state.draft_queue:
@@ -1066,7 +1069,8 @@ Team Alpha,4""", language="csv")
             if os.path.exists(_sim_profiles_path):
                 with open(_sim_profiles_path, 'r') as _sim_pf:
                     _sim_loaded = _sim_json.load(_sim_pf)
-                st.session_state.team_profiles = _sim_loaded
+                _sim_profiles_list = _sim_loaded.get("profiles", [])
+                st.session_state.team_profiles = {p["team_name"]: p for p in _sim_profiles_list}
                 st.rerun()
             else:
                 st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
@@ -1094,9 +1098,9 @@ Team Alpha,4""", language="csv")
         with col2:
             random_seed = st.number_input(
                 "Random Seed (optional)",
-                min_value=0,
-                max_value=999999,
-                value=42,
+                min_value=1,
+                max_value=10000,
+                value=st.session_state.sim_random_seed,
                 help="Set a seed for reproducible simulation results"
             )
         
@@ -1692,8 +1696,10 @@ with tab5:
             if os.path.exists(_profiles_path):
                 with open(_profiles_path, 'r') as _pf:
                     _loaded_profiles = json.load(_pf)
-                st.session_state.team_profiles = _loaded_profiles
-                st.success(f"✅ Loaded profiles for {len(_loaded_profiles)} teams.")
+                _profiles_list = _loaded_profiles.get("profiles", [])
+                _team_profiles = {p["team_name"]: p for p in _profiles_list}
+                st.session_state.team_profiles = _team_profiles
+                st.success(f"✅ Loaded profiles for {len(_team_profiles)} teams.")
             else:
                 st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
         except Exception as _load_err:
