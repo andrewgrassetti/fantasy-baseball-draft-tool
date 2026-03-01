@@ -1586,9 +1586,9 @@ with tab5:
 
                     # Display results as table
                     _eval_rows = []
-                    for team, profile in _eval_results.items():
+                    for profile in _eval_results:
                         _eval_rows.append({
-                            'Team': team,
+                            'Team': profile.get('team_name', '?'),
                             'Tendency': round(profile.get('tendency', 0), 3),
                             'Tendency Label': profile.get('tendency_label', 'balanced'),
                             'Chaos Score (1-10)': profile.get('chaos_score', '?'),
@@ -1615,9 +1615,9 @@ with tab5:
     if 'tendency_eval_results' in st.session_state and st.session_state.tendency_eval_results:
         _prev_results = st.session_state.tendency_eval_results
         _prev_rows = []
-        for team, profile in _prev_results.items():
+        for profile in _prev_results:
             _prev_rows.append({
-                'Team': team,
+                'Team': profile.get('team_name', '?'),
                 'Tendency': round(profile.get('tendency', 0), 3),
                 'Tendency Label': profile.get('tendency_label', 'balanced'),
                 'Chaos Score (1-10)': profile.get('chaos_score', '?'),
