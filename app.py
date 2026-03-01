@@ -1615,27 +1615,6 @@ with tab5:
                     from src.tendency_evaluator import evaluate_all_teams
                     _eval_results = evaluate_all_teams(years=_selected_years)
                     st.session_state.tendency_eval_results = _eval_results
-
-                    # Display results as table
-                    _eval_rows = []
-                    for profile in _eval_results:
-                        _eval_rows.append({
-                            'Team': profile.get('team_name', '?'),
-                            'Tendency': round(profile.get('tendency', 0), 3),
-                            'Tendency Label': profile.get('tendency_label', 'balanced'),
-                            'Chaos Score (1-10)': profile.get('chaos_score', '?'),
-                            'Chaos Raw': round(profile.get('chaos_raw', 0), 3),
-                        })
-                    if _eval_rows:
-                        st.dataframe(pd.DataFrame(_eval_rows), hide_index=True)
-
-                    if st.button("💾 Save Profiles", key="tendency_save_btn"):
-                        try:
-                            from src.tendency_evaluator import save_profiles
-                            save_profiles(_eval_results)
-                            st.success("✅ Profiles saved to profiles/tendencies.json")
-                        except Exception as _save_err:
-                            st.error(f"❌ Error saving profiles: {_save_err}")
                 except Exception as _eval_err:
                     st.error(f"❌ Error running evaluation: {_eval_err}")
             else:
@@ -1658,6 +1637,14 @@ with tab5:
         if _prev_rows:
             st.markdown("**Last Evaluation Results:**")
             st.dataframe(pd.DataFrame(_prev_rows), hide_index=True)
+
+        if st.button("💾 Save Profiles", key="tendency_save_btn"):
+            try:
+                from src.tendency_evaluator import save_profiles
+                save_profiles(_prev_results)
+                st.success("✅ Profiles saved to profiles/tendencies.json")
+            except Exception as _save_err:
+                st.error(f"❌ Error saving profiles: {_save_err}")
 
     st.divider()
 
