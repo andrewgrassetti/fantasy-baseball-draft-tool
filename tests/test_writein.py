@@ -268,3 +268,79 @@ class TestDuplicateKeeperPrevention:
         engine.process_keeper("b1", "Beta", cost=10.0, is_pitcher=False)
         assert len(engine.teams["Alpha"].roster) == 1
         assert len(engine.teams["Beta"].roster) == 1
+
+
+# ---------------------------------------------------------------------------
+# Import replaces existing keepers
+# ---------------------------------------------------------------------------
+
+class TestImportReplacesKeepers:
+    def test_import_clears_previous_keepers(self):
+        engine = _make_engine()
+        engine.process_keeper("b1", "Alpha", cost=5.0, is_pitcher=False)
+        assert len(engine.teams["Alpha"].roster) == 1
+
+        # Import a config with a different keeper
+        config = {
+            "team_names": ["Alpha", "Beta"],
+            "keepers": {
+                "Alpha": [
+                    {"player_id": "b2", "cost": 8.0, "is_pitcher": False},
+                ]
+            }
+        }
+        engine.import_keeper_config(config)
+        roster = engine.teams["Alpha"].roster
+        assert len(roster) == 1
+        assert roster[0].player_id == "b2"
+
+    def test_import_clears_previous_keepers_dataframe(self):
+        engine = _make_engine()
+        engine.process_keeper("b1", "Alpha", cost=5.0, is_pitcher=False)
+        assert engine.bat_df.loc[engine.bat_df['PlayerId'] == 'b1', 'Status'].iloc[0] == 'Keeper'
+
+        config = {
+            "team_names": ["Alpha", "Beta"],
+            "keepers": {
+                "Alpha": [
+                    {"player_id": "b2", "cost": 8.0, "is_pitcher": False},
+                ]
+            }
+        }
+        engine.import_keeper_config(config)
+        # b1 should be Available again
+        assert engine.bat_df.loc[engine.bat_df['PlayerId'] == 'b1', 'Status'].iloc[0] == 'Available'
+        # b2 should now be Keeper
+        assert engine.bat_df.loc[engine.bat_df['PlayerId'] == 'b2', 'Status'].iloc[0] == 'Keeper'
+
+    def test_import_clears_writein_keepers(self):
+        engine = _make_engine()
+        engine.process_writein("Old WI", "Alpha", is_pitcher=False, position="3B", status="Keeper")
+        assert len(engine.teams["Alpha"].roster) == 1
+
+        config = {
+            "team_names": ["Alpha", "Beta"],
+            "keepers": {
+                "Alpha": [
+                    {"player_id": "b1", "cost": 10.0, "is_pitcher": False},
+                ]
+            }
+        }
+        engine.import_keeper_config(config)
+        roster = engine.teams["Alpha"].roster
+        assert len(roster) == 1
+        assert roster[0].player_id == "b1"
+        assert roster[0].is_writein is False
+
+    def test_import_empty_keepers_clears_all(self):
+        engine = _make_engine()
+        engine.process_keeper("b1", "Alpha", cost=5.0, is_pitcher=False)
+        engine.process_keeper("p1", "Beta", cost=3.0, is_pitcher=True)
+
+        config = {
+            "team_names": ["Alpha", "Beta"],
+            "keepers": {}
+        }
+        engine.import_keeper_config(config)
+        assert len(engine.teams["Alpha"].roster) == 0
+        assert len(engine.teams["Beta"].roster) == 0
