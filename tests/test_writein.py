@@ -91,8 +91,7 @@ class TestProcessWritein:
         engine = _make_engine()
         engine.process_writein("No Pos Bat", "Alpha", is_pitcher=False)
         p = engine.teams["Alpha"].roster[0]
-        # Default position for a batter with no position specified is empty string
-        # which is fine — it will be assigned to Util or BN
+        # Batter with no position specified gets empty string; assigned to Util or BN
         assert p.position == ""
 
     def test_writein_default_position_pitcher(self):

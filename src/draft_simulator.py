@@ -414,7 +414,7 @@ class DraftSimulator:
             player_dollars = player_row.get('Dollars', 0)
         except (IndexError, KeyError):
             player_name = player_id
-            player_pos = 'P' if is_pitcher else '??'
+            player_pos = 'P' if is_pitcher else ''
             player_dollars = 0
         
         # Log the pick

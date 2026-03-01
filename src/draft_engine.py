@@ -176,7 +176,7 @@ class DraftEngine:
             status: 'Drafted' or 'Keeper'. Defaults to 'Drafted'.
 
         Returns:
-            The generated player_id string (``WRITEIN-<uuid>``).
+            The generated player_id string (``WRITEIN-<8-char-hex>``).
         """
         player_id = f"WRITEIN-{uuid.uuid4().hex[:8]}"
         new_player = Player(
