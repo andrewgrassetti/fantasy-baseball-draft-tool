@@ -1052,7 +1052,29 @@ Team Alpha,4""", language="csv")
         st.caption("💡 Tendency column is optional. Load profiles in the 📊 Player Tendencies tab for data-driven tendencies.")
     
     st.divider()
-    
+
+    # --- PROFILE STATUS INDICATOR ---
+    _sim_profiles = st.session_state.get('team_profiles')
+    if _sim_profiles:
+        st.success(f"✅ Tendency profiles loaded for {len(_sim_profiles)} teams")
+    else:
+        st.warning("⚠️ No tendency profiles loaded — using default tendencies")
+    if st.button("📂 Load Profiles", key="sim_load_profiles_btn"):
+        try:
+            import json as _sim_json
+            _sim_profiles_path = os.path.join("profiles", "tendencies.json")
+            if os.path.exists(_sim_profiles_path):
+                with open(_sim_profiles_path, 'r') as _sim_pf:
+                    _sim_loaded = _sim_json.load(_sim_pf)
+                st.session_state.team_profiles = _sim_loaded
+                st.rerun()
+            else:
+                st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
+        except Exception as _sim_load_err:
+            st.error(f"❌ Error loading profiles: {_sim_load_err}")
+
+    st.divider()
+
     # Only show rest of UI if CSV is uploaded
     if 'draft_csv' in st.session_state and st.session_state.draft_csv:
         col1, col2, col3 = st.columns([2, 2, 1])
@@ -1526,7 +1548,13 @@ Team Alpha,4""", language="csv")
 # ==========================================
 with tab5:
     st.header("📊 Player Tendencies")
-    st.markdown("Upload historical draft data, run the tendency evaluator, and load team profiles for data-driven draft simulation.")
+    st.markdown("""**Follow these steps to set up data-driven draft tendencies:**
+
+1. **Upload historical draft CSVs** — Upload one or more past draft result files and assign each a year.
+2. **Run the Evaluator** — Select the years to analyze and click **Run Evaluation** to generate tendency and chaos scores.
+3. **Save Profiles** — After evaluation, click **Save Profiles** to write results to `profiles/tendencies.json`.
+4. **Load Profiles** — Click **Load Profiles** here or on the **🎲 Draft Simulator** tab to activate profiles for your session.
+""")
 
     # --- Section 1: Upload Historical Drafts ---
     st.subheader("📁 Upload Historical Drafts")
