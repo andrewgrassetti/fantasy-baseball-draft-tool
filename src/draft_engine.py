@@ -116,10 +116,17 @@ class DraftEngine:
             else:
                 return False # Player not found
 
+        # Check if player is already on this team's roster (prevent duplicates)
+        pid_str = str(row['PlayerId'])
+        team = self.teams[team_name]
+        for existing in team.roster:
+            if existing.player_id == pid_str and existing.is_pitcher == determined_is_pitcher:
+                return True  # Already a keeper on this team
+
         # Create Player Object
         stats = row.to_dict()
         new_player = Player(
-            player_id=str(row['PlayerId']),
+            player_id=pid_str,
             name=row['Name'],
             position=row['POS'],
             team_mlb=row['Team'],
@@ -129,7 +136,7 @@ class DraftEngine:
         )
         
         # Add to Team (Mark as keeper)
-        self.teams[team_name].add_player(new_player, is_keeper=True)
+        team.add_player(new_player, is_keeper=True)
         return True
     
     def process_pick(self, player_id, team_name, is_pitcher):
@@ -168,12 +175,14 @@ class DraftEngine:
 
         Args:
             name: Player name (required).
-            team_name: Team to assign the player to.
-            is_pitcher: Whether the player is a pitcher.
-            position: Position string (e.g. 'SS', 'SP'). Defaults to ''.
-            mlb_team: MLB team abbreviation. Defaults to ''.
-            cost: Dollar value / keeper cost. Defaults to 0.0.
-            status: 'Drafted' or 'Keeper'. Defaults to 'Drafted'.
+            team_name: Team to assign the player to (required).
+            is_pitcher: Whether the player is a pitcher (required).
+            position: Position string (e.g. 'SS', 'SP'). Optional, defaults to
+                      ``'P'`` for pitchers or ``''`` for batters.
+            mlb_team: MLB team abbreviation. Optional, defaults to ``''``.
+            cost: Dollar value / keeper cost. Optional, defaults to ``0.0``.
+            status: ``'Drafted'`` or ``'Keeper'``. Optional, defaults to
+                    ``'Drafted'``.
 
         Returns:
             The generated player_id string (``WRITEIN-<8-char-hex>``).
@@ -635,15 +644,61 @@ class DraftEngine:
             "keepers": keepers
         }
 
+    def _clear_all_keepers(self):
+        """Remove all keeper assignments, resetting players to Available status.
+
+        Iterates every team roster and reverts keeper players in the
+        DataFrames back to 'Available'.  Write-in keepers (not in any
+        DataFrame) are simply dropped from the roster.  Non-keeper
+        roster entries (drafted players) are preserved.
+        """
+        for team in self.teams.values():
+            keepers_to_remove = []
+            for player in team.roster:
+                if player.is_writein:
+                    keepers_to_remove.append(player)
+                    continue
+                pid = self._normalize_player_id(player.player_id)
+                if player.is_pitcher:
+                    mask = self.pitch_df['PlayerId'] == pid
+                    if not self.pitch_df.loc[mask].empty and self.pitch_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
+                        self.pitch_df.loc[mask, 'Status'] = 'Available'
+                        self.pitch_df.loc[mask, 'DraftedBy'] = None
+                        keepers_to_remove.append(player)
+                else:
+                    mask = self.bat_df['PlayerId'] == pid
+                    if not self.bat_df.loc[mask].empty and self.bat_df.loc[mask, 'Status'].iloc[0] == 'Keeper':
+                        self.bat_df.loc[mask, 'Status'] = 'Available'
+                        self.bat_df.loc[mask, 'DraftedBy'] = None
+                        keepers_to_remove.append(player)
+
+            for player in keepers_to_remove:
+                team.remove_player(player.player_id, player.is_pitcher)
+
     def import_keeper_config(self, config: dict) -> bool:
-        """Import keeper configuration from a dict.
+        """Import keeper configuration from a dict, fully replacing any existing keepers.
         
+        All current keepers (including write-ins) are removed before the
+        new configuration is applied, so the loaded file is the single
+        source of truth for keepers.
+
         Args:
             config: Dictionary with keys:
                    - team_names: List of team names
-                   - keepers: Dict mapping team names to lists of keeper dicts
-                             Each keeper dict should have 'player_id' and 'cost' keys,
-                             and optionally 'is_pitcher' for dual-position players
+                   - keepers: Dict mapping team names to lists of keeper dicts.
+                             Each regular keeper dict should have:
+                               - player_id (required): Player identifier
+                               - cost (optional, default 0.0): Keeper cost
+                               - is_pitcher (optional): True for pitcher, False for batter.
+                                 When omitted the engine checks pitchers then batters.
+                             Each write-in keeper dict should have:
+                               - player_id (required): Write-in identifier
+                               - is_writein (required): Must be True
+                               - name (required): Player name
+                               - is_pitcher (required): True for pitcher, False for batter
+                               - cost (optional, default 0.0): Keeper cost
+                               - position (optional, default ''): Position string (e.g. 'SS', 'SP')
+                               - team_mlb (optional, default ''): MLB team abbreviation
                    
         Returns:
             True if import was successful, False otherwise
@@ -655,6 +710,9 @@ class DraftEngine:
                 return False
             
             self.set_team_names(team_names)
+
+            # Clear any existing keepers so the import fully replaces them
+            self._clear_all_keepers()
             
             # Then, process keepers
             keepers = config.get("keepers", {})

@@ -251,13 +251,13 @@ with tab0:
             for team_name in sorted(set(k['Team'] for k in all_keepers)):
                 team_keepers = [k for k in all_keepers if k['Team'] == team_name]
                 with st.expander(f"**{team_name}** ({len(team_keepers)} keepers)"):
-                    for keeper in team_keepers:
+                    for idx, keeper in enumerate(team_keepers):
                         col_a, col_b = st.columns([3, 1])
                         with col_a:
                             st.text(f"{keeper['Player']} ({keeper['Position']}) - ${keeper['Cost']:.0f}")
                         with col_b:
                             player_type = "P" if keeper['is_pitcher'] else "B"
-                            if st.button("Remove", key=f"remove_{keeper['ID']}_{player_type}_{keeper['Team']}"):
+                            if st.button("Remove", key=f"remove_{keeper['ID']}_{player_type}_{keeper['Team']}_{idx}"):
                                 if engine.remove_keeper(keeper['ID'], keeper['is_pitcher']):
                                     st.success("Removed")
                                     st.rerun()
