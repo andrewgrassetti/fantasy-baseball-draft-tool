@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import time
+import os
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
 from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
@@ -62,7 +63,7 @@ if st.session_state.sim_draft_queue and 'simulator' in st.session_state:
     ]
 
 # --- TABS ---
-tab0, tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters", "🎲 Draft Simulator"])
+tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Pre-Draft Setup", "⚾ Draft Room", "📊 Market Analysis", "👥 Team Rosters", "🎲 Draft Simulator", "📊 Player Tendencies"])
 
 # ==========================================
 # TAB 0: PRE-DRAFT SETUP
@@ -372,7 +373,7 @@ with tab1:
             "Upload Draft Order CSV",
             type=['csv'],
             key="draft_room_csv_uploader",
-            help="CSV must have 3 columns: player_name, pick_number, tendency",
+            help="CSV must have columns: player_name, pick_number (tendency column is optional)",
         )
         if _draft_order_uploaded is not None:
             st.session_state.draft_csv = _draft_order_uploaded.getvalue().decode('utf-8')
@@ -380,7 +381,8 @@ with tab1:
 
     with _setup_col2:
         st.markdown("**CSV Format:**")
-        st.code("player_name,pick_number,tendency\nTeam A,1,hitting\nTeam B,2,pitching", language="csv")
+        st.code("player_name,pick_number\nTeam A,1\nTeam B,2\nTeam A,3\nTeam B,4", language="csv")
+        st.caption("💡 Tendency column is optional. Load profiles in the 📊 Player Tendencies tab for data-driven tendencies.")
 
     if 'draft_csv' in st.session_state and st.session_state.draft_csv:
         from io import StringIO
@@ -668,6 +670,7 @@ with tab1:
                     n_simulations=int(n_sims),
                     progress_callback=_snap_cb,
                     user_team_name=st.session_state.get('user_team_name'),
+                    team_profiles=st.session_state.get('team_profiles'),
                 )
                 snap_elapsed = time.time() - snap_start
                 st.session_state.snapshot_results = snapshot_results
@@ -932,7 +935,7 @@ with tab4:
         uploaded_file = st.file_uploader(
             "Upload Draft Order CSV",
             type=['csv'],
-            help="CSV must have 3 columns: player_name, pick_number, tendency"
+            help="CSV must have columns: player_name, pick_number (tendency column is optional)"
         )
         
         if uploaded_file is not None:
@@ -964,11 +967,12 @@ with tab4:
     
     with col2:
         st.markdown("**CSV Format Example:**")
-        st.code("""player_name,pick_number,tendency
-Team Alpha,1,hitting
-Team Beta,2,pitching
-Team Gamma,3,hitting
-Team Alpha,4,hitting""", language="csv")
+        st.code("""player_name,pick_number
+Team Alpha,1
+Team Beta,2
+Team Gamma,3
+Team Alpha,4""", language="csv")
+        st.caption("💡 Tendency column is optional. Load profiles in the 📊 Player Tendencies tab for data-driven tendencies.")
     
     st.divider()
     
@@ -1024,7 +1028,8 @@ Team Alpha,4,hitting""", language="csv")
                     engine=engine,
                     draft_order_csv=st.session_state.draft_csv,
                     user_team_name=user_team,
-                    random_seed=random_seed
+                    random_seed=random_seed,
+                    team_profiles=st.session_state.get('team_profiles'),
                 )
                 st.session_state.simulator = simulator
                 st.session_state.simulation_started = True
@@ -1438,3 +1443,166 @@ Team Alpha,4,hitting""", language="csv")
                     st.rerun()
     else:
         st.info("👆 Upload a draft order CSV to begin")
+
+# ==========================================
+# TAB 5: PLAYER TENDENCIES
+# ==========================================
+with tab5:
+    st.header("📊 Player Tendencies")
+    st.markdown("Upload historical draft data, run the tendency evaluator, and load team profiles for data-driven draft simulation.")
+
+    # --- Section 1: Upload Historical Drafts ---
+    st.subheader("📁 Upload Historical Drafts")
+    _hist_col1, _hist_col2 = st.columns([2, 1])
+    with _hist_col1:
+        _hist_file = st.file_uploader(
+            "Upload draft_results.csv",
+            type=['csv'],
+            key="tendency_hist_upload",
+            help="Upload a historical draft results CSV file.",
+        )
+        _hist_year = st.number_input("Year", min_value=2000, max_value=2099, value=2024, key="tendency_hist_year")
+        if st.button("📤 Upload Historical Data", key="tendency_upload_btn"):
+            if _hist_file is not None:
+                try:
+                    from src.history_manager import save_draft_results
+                    import pandas as _hist_pd
+                    from io import StringIO as _HistSIO
+                    _hist_df = _hist_pd.read_csv(_HistSIO(_hist_file.getvalue().decode('utf-8')))
+                    save_draft_results(year=int(_hist_year), draft_results=_hist_df)
+                    st.success(f"✅ Saved historical draft data for {_hist_year}.")
+                except Exception as _hist_err:
+                    st.error(f"❌ Error saving historical data: {_hist_err}")
+            else:
+                st.warning("Please upload a CSV file first.")
+
+    with _hist_col2:
+        try:
+            from src.history_manager import list_available_years
+            _avail_years = list_available_years()
+            if _avail_years:
+                st.markdown("**Available Years:**")
+                st.write(", ".join(str(y) for y in sorted(_avail_years)))
+            else:
+                st.info("No historical data uploaded yet.")
+        except Exception:
+            st.info("No historical data available.")
+
+    st.divider()
+
+    # --- Section 2: Run Evaluator ---
+    st.subheader("🔬 Run Evaluator")
+    try:
+        from src.history_manager import list_available_years as _list_years
+        _eval_years = _list_years()
+    except Exception:
+        _eval_years = []
+
+    if _eval_years:
+        _selected_years = st.multiselect("Select years to analyze", options=sorted(_eval_years), default=sorted(_eval_years), key="tendency_eval_years")
+        if st.button("🔍 Run Evaluation", key="tendency_eval_btn"):
+            if _selected_years:
+                try:
+                    from src.tendency_evaluator import evaluate_all_teams
+                    _eval_results = evaluate_all_teams(years=_selected_years)
+                    st.session_state.tendency_eval_results = _eval_results
+
+                    # Display results as table
+                    _eval_rows = []
+                    for team, profile in _eval_results.items():
+                        _eval_rows.append({
+                            'Team': team,
+                            'Tendency': round(profile.get('tendency', 0), 3),
+                            'Tendency Label': profile.get('tendency_label', 'balanced'),
+                            'Chaos Score (1-10)': profile.get('chaos_score', '?'),
+                            'Chaos Raw': round(profile.get('chaos_raw', 0), 3),
+                        })
+                    if _eval_rows:
+                        st.dataframe(pd.DataFrame(_eval_rows), hide_index=True)
+
+                    if st.button("💾 Save Profiles", key="tendency_save_btn"):
+                        try:
+                            from src.tendency_evaluator import save_profiles
+                            save_profiles(_eval_results)
+                            st.success("✅ Profiles saved to profiles/tendencies.json")
+                        except Exception as _save_err:
+                            st.error(f"❌ Error saving profiles: {_save_err}")
+                except Exception as _eval_err:
+                    st.error(f"❌ Error running evaluation: {_eval_err}")
+            else:
+                st.warning("Please select at least one year.")
+    else:
+        st.info("Upload historical draft data first to run the evaluator.")
+
+    # Display previously computed results if available
+    if 'tendency_eval_results' in st.session_state and st.session_state.tendency_eval_results:
+        _prev_results = st.session_state.tendency_eval_results
+        _prev_rows = []
+        for team, profile in _prev_results.items():
+            _prev_rows.append({
+                'Team': team,
+                'Tendency': round(profile.get('tendency', 0), 3),
+                'Tendency Label': profile.get('tendency_label', 'balanced'),
+                'Chaos Score (1-10)': profile.get('chaos_score', '?'),
+                'Chaos Raw': round(profile.get('chaos_raw', 0), 3),
+            })
+        if _prev_rows:
+            st.markdown("**Last Evaluation Results:**")
+            st.dataframe(pd.DataFrame(_prev_rows), hide_index=True)
+
+    st.divider()
+
+    # --- Section 3: Save Current Draft ---
+    st.subheader("💾 Save Current Draft to History")
+    _has_drafted = (
+        (engine.bat_df['Status'].isin(['Drafted', 'Keeper'])).any()
+        or (engine.pitch_df['Status'].isin(['Drafted', 'Keeper'])).any()
+    )
+    if _has_drafted:
+        _save_year = st.number_input("Year for this draft", min_value=2000, max_value=2099, value=2025, key="tendency_save_year")
+        if st.button("💾 Save Draft to History", key="tendency_save_draft_btn"):
+            try:
+                from src.history_manager import save_draft_results, build_draft_results_from_engine
+                _draft_results_df = build_draft_results_from_engine(engine, st.session_state.get('draft_csv', ''))
+                save_draft_results(
+                    year=int(_save_year),
+                    draft_results=_draft_results_df,
+                    draft_order_csv=st.session_state.get('draft_csv'),
+                    keeper_config=engine.export_keeper_config(),
+                )
+                st.success(f"✅ Current draft saved to history for {_save_year}.")
+            except Exception as _save_draft_err:
+                st.error(f"❌ Error saving draft: {_save_draft_err}")
+    else:
+        st.info("No draft in progress. Draft or assign keepers first to save results.")
+
+    st.divider()
+
+    # --- Section 4: Load & Apply Profiles ---
+    st.subheader("📂 Load & Apply Profiles")
+    if st.button("📂 Load Profiles from profiles/tendencies.json", key="tendency_load_btn"):
+        try:
+            import json
+            _profiles_path = os.path.join("profiles", "tendencies.json")
+            if os.path.exists(_profiles_path):
+                with open(_profiles_path, 'r') as _pf:
+                    _loaded_profiles = json.load(_pf)
+                st.session_state.team_profiles = _loaded_profiles
+                st.success(f"✅ Loaded profiles for {len(_loaded_profiles)} teams.")
+            else:
+                st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
+        except Exception as _load_err:
+            st.error(f"❌ Error loading profiles: {_load_err}")
+
+    if 'team_profiles' in st.session_state and st.session_state.team_profiles:
+        st.markdown("**Loaded Team Profiles:**")
+        _profile_rows = []
+        for team, profile in st.session_state.team_profiles.items():
+            _profile_rows.append({
+                'Team': team,
+                'Tendency': round(profile.get('tendency', 0), 3),
+                'Tendency Label': profile.get('tendency_label', 'balanced'),
+                'Chaos Score': profile.get('chaos_score', '?'),
+            })
+        st.dataframe(pd.DataFrame(_profile_rows), hide_index=True)
+        st.caption("These profiles are now active and will be used by the Draft Simulator and Snapshot Projections.")
