@@ -2,6 +2,16 @@ __pycache__/
 .pytest_cache/
 .env
 saves/
+data/
+*.pyc
+
+# Historical draft data (user-specific)
+history/*/
+!history/.gitkeep
+
+# Generated tendency profiles
+profiles/*/
+!profiles/.gitkeep
 
 # Test scripts
 test_*.py
