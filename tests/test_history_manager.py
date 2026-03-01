@@ -12,6 +12,7 @@ import pytest
 from src.history_manager import (
     DRAFT_RESULTS_COLUMNS,
     build_draft_results_from_engine,
+    collect_projection_files,
     list_available_years,
     load_draft_order,
     load_draft_results,
@@ -334,3 +335,47 @@ class TestBuildDraftResultsFromEngine:
 
         assert list(result["pick_number"]) == [1, 2]
         assert result.iloc[0]["team_name"] == "Beta"
+
+
+# ---------------------------------------------------------------------------
+# collect_projection_files
+# ---------------------------------------------------------------------------
+
+class TestCollectProjectionFiles:
+    def test_returns_empty_dict_for_missing_dir(self, tmp_path):
+        result = collect_projection_files(data_dir=str(tmp_path / "nonexistent"))
+        assert result == {}
+
+    def test_returns_empty_dict_for_empty_dir(self, tmp_path):
+        result = collect_projection_files(data_dir=str(tmp_path))
+        assert result == {}
+
+    def test_collects_csv_files(self, tmp_path):
+        (tmp_path / "batters.csv").write_text("Name,HR\nPlayer,30\n")
+        (tmp_path / "pitchers.csv").write_text("Name,ERA\nPitcher,3.50\n")
+        result = collect_projection_files(data_dir=str(tmp_path))
+        assert len(result) == 2
+        assert "batters.csv" in result
+        assert "pitchers.csv" in result
+        assert "Player,30" in result["batters.csv"]
+
+    def test_ignores_non_csv_files(self, tmp_path):
+        (tmp_path / "data.csv").write_text("a,b\n1,2\n")
+        (tmp_path / "readme.txt").write_text("not a csv")
+        (tmp_path / "config.json").write_text("{}")
+        result = collect_projection_files(data_dir=str(tmp_path))
+        assert list(result.keys()) == ["data.csv"]
+
+    def test_ignores_subdirectories(self, tmp_path):
+        (tmp_path / "data.csv").write_text("a,b\n1,2\n")
+        sub = tmp_path / "subdir.csv"
+        sub.mkdir()
+        result = collect_projection_files(data_dir=str(tmp_path))
+        assert list(result.keys()) == ["data.csv"]
+
+    def test_returns_sorted_filenames(self, tmp_path):
+        (tmp_path / "z_file.csv").write_text("z\n")
+        (tmp_path / "a_file.csv").write_text("a\n")
+        (tmp_path / "m_file.csv").write_text("m\n")
+        result = collect_projection_files(data_dir=str(tmp_path))
+        assert list(result.keys()) == ["a_file.csv", "m_file.csv", "z_file.csv"]
