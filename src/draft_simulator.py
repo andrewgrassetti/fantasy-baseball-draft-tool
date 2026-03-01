@@ -87,7 +87,9 @@ class DraftSimulator:
     # influences player selection.  Higher = more influence.
     WEIGHT_TENDENCY_PROFILE = 0.10  # User-tunable
 
-    # Base SCORE_EXPONENT (existing value, used when chaos_score = 1 / most predictable)
+    # Base SCORE_EXPONENT used when chaos_score = 1 (most predictable).
+    # Mirrors SCORE_EXPONENT value; used for teams with profiles while
+    # SCORE_EXPONENT remains as the fallback for teams without profiles.
     BASE_SCORE_EXPONENT = 4.0
 
     # Minimum SCORE_EXPONENT (used when chaos_score = 10 / most chaotic)
@@ -1326,6 +1328,9 @@ class DraftSimulator:
             reasons.append("fills positional need")
         
         # Check if matches tendency
+        # Rationale uses 'tendency_label' (human-readable) from the profile
+        # rather than the continuous 'tendency' float used in scoring, since
+        # the label is more meaningful in a user-facing rationale string.
         if team_name in self.team_profiles:
             profile = self.team_profiles[team_name]
             label = profile.get('tendency_label', 'balanced')
