@@ -81,6 +81,27 @@ class DraftSimulator:
     # Values > 1 concentrate selection probability on top-scored players.
     SCORE_EXPONENT = 4.0
     
+    # --- Profile-driven weights (Phase 3) ---
+    # Weight for the continuous tendency score (replaces binary tendency).
+    # Controls how strongly a team's historical hitting/pitching preference
+    # influences player selection.  Higher = more influence.
+    WEIGHT_TENDENCY_PROFILE = 0.10  # User-tunable
+
+    # Base SCORE_EXPONENT used when chaos_score = 1 (most predictable).
+    # Mirrors SCORE_EXPONENT value; used for teams with profiles while
+    # SCORE_EXPONENT remains as the fallback for teams without profiles.
+    BASE_SCORE_EXPONENT = 4.0
+
+    # Minimum SCORE_EXPONENT (used when chaos_score = 10 / most chaotic)
+    # Lower exponent = flatter probability distribution = more random picks
+    MIN_SCORE_EXPONENT = 1.5
+
+    # Controls how much the chaos score affects the score exponent.
+    # The effective exponent per team is:
+    #   effective_exponent = BASE_SCORE_EXPONENT - (chaos_normalized * CHAOS_EXPONENT_SCALE)
+    # where chaos_normalized = (chaos_score - 1) / 9  (maps 1–10 to 0.0–1.0)
+    CHAOS_EXPONENT_SCALE = 2.5  # User-tunable (BASE - MIN = 2.5 by default)
+    
     # Positional priority multipliers reflecting positional scarcity.
     # Applied to positional need scores so higher-priority positions are
     # drafted earlier when multiple slots are open.
@@ -137,7 +158,7 @@ class DraftSimulator:
     # designed to de-prioritize that position.
     MAX_PER_POSITION_IN_SHORTLIST = 2
     
-    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None):
+    def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None, team_profiles: Optional[Dict[str, Dict]] = None):
         """Initialize the draft simulator.
         
         Args:
@@ -150,6 +171,10 @@ class DraftSimulator:
             draft_order_df: Optional pre-parsed draft order DataFrame.  When
                             provided, ``draft_order_csv`` parsing is skipped
                             (saves repeated CSV parsing in Monte Carlo loops).
+            team_profiles: Optional dict mapping team name to profile dict
+                           (as output by tendency_evaluator.evaluate_team()).
+                           Each profile has at minimum: tendency (float -1 to 1),
+                           chaos_score (int 1-10), chaos_raw (float 0-1).
         """
         # Deep copy the engine to avoid mutating the main draft state
         if snapshot_mode:
@@ -157,6 +182,7 @@ class DraftSimulator:
         else:
             self.engine = self._deep_copy_engine(engine)
         self.snapshot_mode = snapshot_mode
+        self.team_profiles = team_profiles or {}
         
         # Parse draft order (or reuse pre-parsed DataFrame)
         if draft_order_df is not None:
@@ -303,7 +329,7 @@ class DraftSimulator:
             raise ValueError(f"Failed to parse CSV: {str(e)}")
         
         # Validate columns
-        required_cols = ['player_name', 'pick_number', 'tendency']
+        required_cols = ['player_name', 'pick_number']
         if not all(col in df.columns for col in required_cols):
             raise ValueError(f"CSV must have columns: {required_cols}. Found: {list(df.columns)}")
         
@@ -317,11 +343,15 @@ class DraftSimulator:
         if df['pick_number'].duplicated().any():
             raise ValueError("Pick numbers must be unique")
         
-        # Validate tendencies
-        valid_tendencies = ['hitting', 'pitching']
-        invalid_tendencies = df[~df['tendency'].isin(valid_tendencies)]
-        if not invalid_tendencies.empty:
-            raise ValueError(f"Invalid tendencies found. Must be 'hitting' or 'pitching'. Invalid values: {invalid_tendencies['tendency'].unique()}")
+        # Handle tendency column
+        if 'tendency' not in df.columns:
+            df['tendency'] = 'balanced'  # Default when no tendency column
+        else:
+            # Validate tendencies
+            valid_tendencies = ['hitting', 'pitching']
+            invalid_tendencies = df[~df['tendency'].isin(valid_tendencies)]
+            if not invalid_tendencies.empty:
+                raise ValueError(f"Invalid tendencies found. Must be 'hitting' or 'pitching'. Invalid values: {invalid_tendencies['tendency'].unique()}")
         
         # Sort by pick number
         df = df.sort_values('pick_number').reset_index(drop=True)
@@ -579,8 +609,19 @@ class DraftSimulator:
         scores_array = scores_array - scores_array.min()
         # Add epsilon to ensure no zero probabilities
         scores_array = scores_array + self.EPSILON
+        # Determine effective score exponent based on team's chaos profile
+        team_name = pick_info['team_name']
+        if team_name in self.team_profiles:
+            chaos_score = self.team_profiles[team_name].get('chaos_score', 1)
+            # Normalize chaos_score from 1-10 to 0.0-1.0
+            chaos_normalized = (chaos_score - 1) / 9.0
+            # Higher chaos = lower exponent = flatter distribution = more random
+            effective_exponent = self.BASE_SCORE_EXPONENT - (chaos_normalized * self.CHAOS_EXPONENT_SCALE)
+            effective_exponent = max(effective_exponent, self.MIN_SCORE_EXPONENT)
+        else:
+            effective_exponent = self.SCORE_EXPONENT  # Original default (4.0)
         # Apply power-law exponent to concentrate probability on top-scored players
-        scores_array = np.power(scores_array, self.SCORE_EXPONENT)
+        scores_array = np.power(scores_array, effective_exponent)
         probabilities = scores_array / scores_array.sum()
         
         # Select player using weighted random choice
@@ -654,8 +695,12 @@ class DraftSimulator:
         score += category_score * self.WEIGHT_CATEGORY_NEED
         
         # Factor 3: Player Tendency (MEDIUM weight)
-        tendency_score = self._calculate_tendency_score(tendency, is_pitcher)
-        score += tendency_score * self.WEIGHT_TENDENCY
+        tendency_score = self._calculate_tendency_score(tendency, is_pitcher, team_name=team_name)
+        # If profile exists for this team, use WEIGHT_TENDENCY_PROFILE; else use WEIGHT_TENDENCY
+        if team_name in self.team_profiles:
+            score += tendency_score * self.WEIGHT_TENDENCY_PROFILE
+        else:
+            score += tendency_score * self.WEIGHT_TENDENCY
         
         # Factor 4: Market Value Baseline (dollar expansion widens the gap
         # between high- and low-value players before weighting)
@@ -898,8 +943,17 @@ class DraftSimulator:
         scores = np.power(dollars, self.DOLLAR_EXPANSION_EXPONENT) * self.WEIGHT_MARKET_VALUE
 
         # --- Tendency score (constant for all candidates of same type) ---
-        if (tendency == 'pitching' and is_pitcher) or (tendency == 'hitting' and not is_pitcher):
+        if team_name in self.team_profiles:
+            profile_tendency = self.team_profiles[team_name]['tendency']
+            if is_pitcher:
+                tendency_val = 50.0 * (1.0 + profile_tendency)
+            else:
+                tendency_val = 50.0 * (1.0 - profile_tendency)
+            scores += tendency_val * self.WEIGHT_TENDENCY_PROFILE
+        elif (tendency == 'pitching' and is_pitcher) or (tendency == 'hitting' and not is_pitcher):
             scores += 50.0 * self.WEIGHT_TENDENCY
+        elif tendency == 'balanced':
+            scores += 25.0 * self.WEIGHT_TENDENCY
 
         # --- Vectorized category-need scores ---
         if cached_rankings is not None:
@@ -1205,20 +1259,29 @@ class DraftSimulator:
         
         return category_score
     
-    def _calculate_tendency_score(self, tendency: str, is_pitcher: bool) -> float:
+    def _calculate_tendency_score(self, tendency: str, is_pitcher: bool, team_name: str = None) -> float:
         """Calculate tendency score.
         
         Args:
-            tendency: Team's drafting tendency ('hitting' or 'pitching')
+            tendency: Team's drafting tendency ('hitting', 'pitching', or 'balanced')
             is_pitcher: Whether the player is a pitcher
+            team_name: Optional team name for profile-based scoring
             
         Returns:
             Tendency score (0-100)
         """
+        if team_name is not None and team_name in self.team_profiles:
+            profile_tendency = self.team_profiles[team_name]['tendency']
+            if is_pitcher:
+                return 50.0 * (1.0 + profile_tendency)
+            else:
+                return 50.0 * (1.0 - profile_tendency)
         if tendency == 'pitching' and is_pitcher:
             return 50.0
         elif tendency == 'hitting' and not is_pitcher:
             return 50.0
+        elif tendency == 'balanced':
+            return 25.0
         else:
             return 0.0
     
@@ -1265,7 +1328,16 @@ class DraftSimulator:
             reasons.append("fills positional need")
         
         # Check if matches tendency
-        if (tendency == 'pitching' and is_pitcher) or (tendency == 'hitting' and not is_pitcher):
+        # Rationale uses 'tendency_label' (human-readable) from the profile
+        # rather than the continuous 'tendency' float used in scoring, since
+        # the label is more meaningful in a user-facing rationale string.
+        if team_name in self.team_profiles:
+            profile = self.team_profiles[team_name]
+            label = profile.get('tendency_label', 'balanced')
+            chaos = profile.get('chaos_score', '?')
+            if (label == 'pitching' and is_pitcher) or (label == 'hitting' and not is_pitcher):
+                reasons.append(f"matches {label} profile (chaos: {chaos}/10)")
+        elif (tendency == 'pitching' and is_pitcher) or (tendency == 'hitting' and not is_pitcher):
             reasons.append(f"matches {tendency} preference")
         
         # Always mention value
@@ -1336,6 +1408,7 @@ def run_monte_carlo_snapshot(
     progress_callback=None,
     max_workers: int = None,
     user_team_name: str = None,
+    team_profiles: Dict[str, Dict] = None,
 ) -> dict:
     """Run N Monte Carlo simulations from the current draft state.
 
@@ -1417,6 +1490,7 @@ def run_monte_carlo_snapshot(
                 random_seed=i,
                 snapshot_mode=True,
                 draft_order_df=draft_order_df,
+                team_profiles=team_profiles,
             )
 
             # Fast-forward past already-completed picks
@@ -1457,6 +1531,7 @@ def run_monte_carlo_snapshot(
                 random_seed=i,
                 snapshot_mode=True,
                 draft_order_df=draft_order_df,
+                team_profiles=team_profiles,
             )
             return fallback.get_standings().set_index('Team'), None
 

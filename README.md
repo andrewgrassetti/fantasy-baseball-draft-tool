@@ -42,10 +42,18 @@ A modular, Python-based fantasy baseball draft engine featuring a Streamlit dash
 * Each team shows a roster slot summary (filled / limit for every slot) and a split roster table (Batters and Pitchers).
 
 ### Draft Simulator
-* Upload a CSV-based draft order with per-team tendencies.
-* The simulator auto-picks for AI teams using weighted random selection based on dollar value, positional need, category need, and tendency.
+* Upload a CSV-based draft order with optional per-team tendencies, or load data-driven profiles from historical draft analysis.
+* The simulator auto-picks for AI teams using weighted random selection based on dollar value, positional need, category need, and tendency profiles.
+* Profile-driven tendencies use a continuous float (-1 to +1) instead of binary "hitting"/"pitching", enabling more nuanced team behavior.
+* Chaos scores (1-10) per team modulate the randomness of AI picks — high chaos teams make less predictable selections.
 * Pauses automatically when it is your turn so you can make your own pick.
 * Displays a running pick log, live standings, available player lists, and a player value scatter plot throughout the simulation.
+
+### Player Tendencies
+* Upload historical draft results to build team behavioral profiles.
+* Run the tendency evaluator to compute per-team tendency (hitting/pitching preference) and chaos scores.
+* Save and load profiles from `profiles/tendencies.json`.
+* Save current draft results to history for future analysis.
 
 ### Projection Data Pipeline
 * Ingests standard FanGraphs CSV exports (Steamer, BAT X, ZiPS, OOPSY, etc.).
@@ -175,40 +183,52 @@ The app will open in your default browser at `http://localhost:8501`.
 
 ### 6. Draft Simulator (🎲 Tab)
 
-1. **Upload a Draft Order CSV** with columns `player_name`, `pick_number`, and `tendency`. Example:
+1. **Upload a Draft Order CSV** with columns `player_name` and `pick_number`. The `tendency` column is optional for backward compatibility. Example:
    ```csv
-   player_name,pick_number,tendency
-   Team Alpha,1,hitting
-   Team Beta,2,pitching
-   Team Gamma,3,hitting
-   Team Alpha,4,hitting
+   player_name,pick_number
+   Team Alpha,1
+   Team Beta,2
+   Team Gamma,3
+   Team Alpha,4
    ```
+   The old 3-column format (`player_name,pick_number,tendency`) is still supported for backward compatibility.
 2. **Select your team** from the dropdown (must match a `player_name` in the CSV).
 3. **(Optional)** Set a **Random Seed** for reproducible simulation results.
 4. Click ▶️ **Run Simulation**. AI teams auto-pick until it is your turn.
 5. When the simulator pauses on your pick, select a player and click ✅ **Confirm Pick**.
 6. After the simulation completes, view final rosters, standings, and player value charts.
 
+### 7. Player Tendencies (📊 Tab)
+
+1. **Upload Historical Drafts** — Upload `draft_results.csv` files from past seasons.
+2. **Run Evaluator** — Select which years to analyze and run the tendency evaluator. View per-team tendency scores and chaos ratings.
+3. **Save Current Draft** — Save the current draft results to history for future analysis.
+4. **Load & Apply Profiles** — Load profiles from `profiles/tendencies.json` to use data-driven tendencies in the simulator.
+
 ## 📂 Project Structure
 
 ```text
 fantasy-baseball-draft-tool/
-├── app.py                  # Main Streamlit application (all 5 tabs)
+├── app.py                  # Main Streamlit application (all 6 tabs)
 ├── requirements.txt        # Python dependencies
 ├── README.md               # This file
 ├── data/                   # FanGraphs CSV exports (projection, auction, statcast)
 │   └── DraftOrder.csv      # Example draft order CSV for the simulator
+├── history/                # Auto-created directory for historical draft data (gitignored)
+├── profiles/               # Auto-created directory for team tendency profiles (gitignored)
 ├── saves/                  # Auto-created directory for saved keeper configs (gitignored)
 └── src/
     ├── data_loader.py      # CSV loading, merging, and row-wise averaging logic
     ├── draft_engine.py     # Core draft state: picks, keepers, undo, standings, import/export
     ├── draft_simulator.py  # Probabilistic AI draft simulation engine
+    ├── history_manager.py  # Save / load historical draft results for tendency analysis
     ├── models.py           # Player and Team dataclasses with roster slot logic
-    └── persistence.py      # Save / load / list / delete keeper JSON configurations
+    ├── persistence.py      # Save / load / list / delete keeper JSON configurations
+    └── tendency_evaluator.py  # Analyze draft history for team tendencies and chaos scores
 ```
 
 ## 📝 Notes
 
 * **Keeper Configurations:** The `saves/` directory is gitignored, so keeper configuration files are user-specific. When migrating to a new machine, manually copy your keeper JSON files from `saves/` or re-create your configurations.
-* **Draft Order CSV:** A sample `DraftOrder.csv` is included in the `data/` directory. You can create your own following the same three-column format (`player_name`, `pick_number`, `tendency`).
+* **Draft Order CSV:** A sample `DraftOrder.csv` is included in the `data/` directory. The new format uses two columns (`player_name`, `pick_number`). The old three-column format (`player_name`, `pick_number`, `tendency`) is still supported for backward compatibility.
 * **Projection Systems:** The data pipeline is projection-system agnostic. As long as your CSVs contain the expected columns (see `COLUMNS_TO_KEEP` in `src/data_loader.py`), any FanGraphs-compatible export will work.
