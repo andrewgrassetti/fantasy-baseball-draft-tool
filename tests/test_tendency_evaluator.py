@@ -12,6 +12,7 @@ from src.history_manager import DRAFT_RESULTS_COLUMNS, save_draft_results
 from src.tendency_evaluator import (
     _compute_chaos_score,
     _compute_tendency_score,
+    _normalize_chaos_scores,
     evaluate_all_teams,
     evaluate_team,
     load_profiles,
@@ -285,6 +286,58 @@ class TestEvaluateTeam:
 
 
 # ---------------------------------------------------------------------------
+# _normalize_chaos_scores
+# ---------------------------------------------------------------------------
+
+class TestNormalizeChaosScores:
+    def test_spreads_scores_across_range(self):
+        """Min-raw team gets 1, max-raw team gets 10."""
+        profiles = [
+            {"team_name": "A", "chaos_raw": 0.3, "chaos_score": 4},
+            {"team_name": "B", "chaos_raw": 0.5, "chaos_score": 6},
+            {"team_name": "C", "chaos_raw": 0.7, "chaos_score": 7},
+        ]
+        _normalize_chaos_scores(profiles)
+        assert profiles[0]["chaos_score"] == 1   # lowest raw
+        assert profiles[2]["chaos_score"] == 10  # highest raw
+
+    def test_identical_raw_values_get_score_one(self):
+        """When all teams have the same chaos_raw, all get score 1."""
+        profiles = [
+            {"team_name": "A", "chaos_raw": 0.5, "chaos_score": 6},
+            {"team_name": "B", "chaos_raw": 0.5, "chaos_score": 6},
+        ]
+        _normalize_chaos_scores(profiles)
+        assert profiles[0]["chaos_score"] == 1
+        assert profiles[1]["chaos_score"] == 1
+
+    def test_empty_profiles(self):
+        """No crash on empty list."""
+        profiles: list = []
+        _normalize_chaos_scores(profiles)
+        assert profiles == []
+
+    def test_single_team_gets_score_one(self):
+        """A single team has no peers → min == max → score 1."""
+        profiles = [
+            {"team_name": "Solo", "chaos_raw": 0.6, "chaos_score": 6},
+        ]
+        _normalize_chaos_scores(profiles)
+        assert profiles[0]["chaos_score"] == 1
+
+    def test_preserves_ordering(self):
+        """Relative order of chaos_score matches chaos_raw ordering."""
+        profiles = [
+            {"team_name": "A", "chaos_raw": 0.2, "chaos_score": 3},
+            {"team_name": "B", "chaos_raw": 0.8, "chaos_score": 8},
+            {"team_name": "C", "chaos_raw": 0.4, "chaos_score": 5},
+        ]
+        _normalize_chaos_scores(profiles)
+        assert profiles[0]["chaos_score"] < profiles[2]["chaos_score"]
+        assert profiles[2]["chaos_score"] < profiles[1]["chaos_score"]
+
+
+# ---------------------------------------------------------------------------
 # evaluate_all_teams
 # ---------------------------------------------------------------------------
 
@@ -311,6 +364,26 @@ class TestEvaluateAllTeams:
     def test_empty_history(self, tmp_path):
         profiles = evaluate_all_teams(history_dir=str(tmp_path))
         assert profiles == []
+
+    def test_chaos_scores_normalized_across_teams(self, tmp_path):
+        """evaluate_all_teams should spread chaos scores using min-max."""
+        # Optimal drafter (low chaos)
+        _save_year(tmp_path, 2025, [
+            {"team_name": "Good", "is_pitcher": False, "dollars": 30.0,
+             "player_id": "p1", "pick_number": 1},
+            {"team_name": "Good", "is_pitcher": False, "dollars": 20.0,
+             "player_id": "p2", "pick_number": 2},
+            # Bad drafter picks worst first
+            {"team_name": "Bad", "is_pitcher": False, "dollars": 1.0,
+             "player_id": "p3", "pick_number": 3},
+            {"team_name": "Bad", "is_pitcher": True, "dollars": 5.0,
+             "player_id": "p4", "pick_number": 4},
+        ])
+        profiles = evaluate_all_teams(history_dir=str(tmp_path))
+        scores = {p["team_name"]: p["chaos_score"] for p in profiles}
+        # The optimal drafter should get 1, the bad drafter should get 10
+        assert scores["Good"] == 1
+        assert scores["Bad"] == 10
 
 
 # ---------------------------------------------------------------------------

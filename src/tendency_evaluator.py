@@ -135,6 +135,32 @@ def _compute_chaos_score(
     return float(np.mean(deviations))
 
 
+def _normalize_chaos_scores(profiles: List[Dict]) -> None:
+    """Re-normalize chaos scores across all profiles using min-max scaling.
+
+    After individual ``evaluate_team`` calls produce per-team chaos values,
+    this function rescales them relative to the group so the full 1–10 range
+    is utilised.  The team with the lowest ``chaos_raw`` receives a score of
+    1 and the team with the highest receives 10.
+
+    The list is modified **in place**.
+    """
+    raw_values = [p["chaos_raw"] for p in profiles]
+    if not raw_values:
+        return
+
+    min_raw = min(raw_values)
+    max_raw = max(raw_values)
+
+    for p in profiles:
+        if max_raw == min_raw:
+            # All teams have the same chaos – assign a neutral score
+            p["chaos_score"] = 1
+        else:
+            normalized = (p["chaos_raw"] - min_raw) / (max_raw - min_raw)
+            p["chaos_score"] = int(np.clip(np.round(normalized * 9 + 1), 1, 10))
+
+
 # --- Public Functions ---
 
 def evaluate_team(
@@ -235,6 +261,11 @@ def evaluate_all_teams(
         evaluate_team(name, years=years, history_dir=history_dir)
         for name in sorted(team_names)
     ]
+
+    # Re-normalize chaos scores relative to the group so the full 1-10
+    # range is used instead of everyone clustering high.
+    _normalize_chaos_scores(profiles)
+
     return profiles
 
 
