@@ -848,6 +848,63 @@ with tab1:
     else:
         st.info("Upload a draft order CSV above to enable the snapshot feature.")
 
+    # ==========================================
+    # SAVE DRAFT TO HISTORY SECTION (tab1)
+    # ==========================================
+    st.divider()
+    st.subheader("💾 Save Draft to History")
+    st.markdown(
+        "One-click save of **draft results**, **keeper assignments**, **draft order**, "
+        "and **projection data** to the ``history/`` folder for future reference and tendency analysis."
+    )
+
+    _dr_has_drafted = (
+        (engine.bat_df['Status'].isin(['Drafted', 'Keeper'])).any()
+        or (engine.pitch_df['Status'].isin(['Drafted', 'Keeper'])).any()
+    )
+
+    if _dr_has_drafted:
+        from datetime import datetime as _dt
+        _dr_save_year = st.number_input(
+            "Year for this draft",
+            min_value=2000,
+            max_value=2099,
+            value=_dt.now().year,
+            key="draft_room_save_year",
+        )
+
+        if st.button("💾 Save Draft to History", type="primary", key="draft_room_save_btn"):
+            try:
+                from src.history_manager import (
+                    save_draft_results as _dr_save,
+                    build_draft_results_from_engine as _dr_build,
+                    collect_projection_files as _dr_collect,
+                )
+
+                _dr_csv = st.session_state.get('draft_csv', '')
+                _dr_results_df = _dr_build(engine, _dr_csv) if _dr_csv else None
+
+                if _dr_results_df is None or _dr_results_df.empty:
+                    st.warning("⚠️ Could not build draft results — upload a draft order CSV first.")
+                else:
+                    _dr_proj_files = _dr_collect()
+                    _dr_save(
+                        year=int(_dr_save_year),
+                        draft_results=_dr_results_df,
+                        draft_order_csv=_dr_csv if _dr_csv else None,
+                        keeper_config=engine.export_keeper_config(),
+                        projection_files=_dr_proj_files if _dr_proj_files else None,
+                    )
+                    _proj_msg = f", and {len(_dr_proj_files)} projection files" if _dr_proj_files else ""
+                    st.success(
+                        f"✅ Draft saved to `history/{_dr_save_year}/`! "
+                        f"Includes results, keepers, draft order{_proj_msg}."
+                    )
+            except Exception as _dr_save_err:
+                st.error(f"❌ Error saving draft: {_dr_save_err}")
+    else:
+        st.info("No draft in progress. Draft or assign keepers first to save results.")
+
 
 with tab2:
     st.header("Player Value Visualization")

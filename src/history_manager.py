@@ -184,6 +184,39 @@ def list_available_years(history_dir: str = HISTORY_DIR) -> List[int]:
     return sorted(years)
 
 
+def collect_projection_files(data_dir: str = "data") -> Dict[str, str]:
+    """Read all CSV files from the data directory and return as filename→content mapping.
+
+    This is used to archive the projection CSVs alongside draft results so that
+    the exact inputs used for a draft are preserved in the history folder.
+
+    Args:
+        data_dir: Path to the data directory (default: ``data``).
+
+    Returns:
+        Dict mapping filename to file content for each CSV found.  Returns an
+        empty dict if the directory does not exist or contains no CSVs.
+    """
+    if not os.path.isdir(data_dir):
+        return {}
+
+    files: Dict[str, str] = {}
+    for entry in sorted(os.listdir(data_dir)):
+        if not entry.lower().endswith(".csv"):
+            continue
+        filepath = os.path.join(data_dir, entry)
+        if not os.path.isfile(filepath):
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8-sig") as f:
+                files[entry] = f.read()
+        except (OSError, UnicodeDecodeError):
+            # Skip files that can't be read
+            continue
+
+    return files
+
+
 def build_draft_results_from_engine(
     engine,
     draft_order_csv: str,
