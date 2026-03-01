@@ -262,7 +262,7 @@ class TestDuplicateKeeperPrevention:
         assert len(roster) == 1
 
     def test_same_player_different_teams_allowed(self):
-        """Same player can be a keeper on different teams (unusual but key-safe)."""
+        """Duplicate check is per-team; the same player on different teams is not blocked."""
         engine = _make_engine()
         engine.process_keeper("b1", "Alpha", cost=10.0, is_pitcher=False)
         engine.process_keeper("b1", "Beta", cost=10.0, is_pitcher=False)
