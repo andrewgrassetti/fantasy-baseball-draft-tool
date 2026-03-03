@@ -45,6 +45,25 @@ if 'sim_new_picks' not in st.session_state:
 if 'sim_random_seed' not in st.session_state:
     st.session_state.sim_random_seed = random.randint(1, 10000)
 
+# --- AUTO-LOAD TENDENCY PROFILES ---
+# On first run, automatically load profiles/tendencies.json if it exists.
+if 'team_profiles' not in st.session_state:
+    _auto_profiles_path = os.path.join("profiles", "tendencies.json")
+    if os.path.exists(_auto_profiles_path):
+        try:
+            import json as _json_auto
+            with open(_auto_profiles_path, 'r') as _apf:
+                _auto_loaded = _json_auto.load(_apf)
+            _auto_profiles_list = _auto_loaded.get("profiles", [])
+            st.session_state.team_profiles = {p["team_name"]: p for p in _auto_profiles_list}
+        except Exception:
+            st.session_state.team_profiles = {}
+    else:
+        st.session_state.team_profiles = {}
+if 'tendencies_enabled' not in st.session_state:
+    # Enable by default when profiles were auto-loaded
+    st.session_state.tendencies_enabled = bool(st.session_state.get('team_profiles'))
+
 # Auto-cleanup: remove unavailable players from the draft queue
 if st.session_state.draft_queue:
     available_pids = set(
@@ -411,11 +430,11 @@ with tab1:
     st.subheader("📋 Draft Setup")
 
     # --- PROFILE STATUS INDICATOR ---
-    _draft_profiles = st.session_state.get('team_profiles')
+    _draft_profiles = st.session_state.get('team_profiles') if st.session_state.get('tendencies_enabled') else None
     if _draft_profiles:
         st.success(f"✅ Tendency profiles active — {len(_draft_profiles)} teams loaded from 📊 Player Tendencies")
     else:
-        st.info("ℹ️ No tendency profiles loaded — using default tendencies. Load profiles in the 📊 Player Tendencies tab.")
+        st.info("ℹ️ No tendency profiles active — using default tendencies. Toggle profiles on in the 📊 Player Tendencies tab.")
 
     _setup_col1, _setup_col2 = st.columns([2, 1])
 
@@ -757,7 +776,7 @@ with tab1:
                     n_simulations=int(n_sims),
                     progress_callback=_snap_cb,
                     user_team_name=st.session_state.get('user_team_name'),
-                    team_profiles=st.session_state.get('team_profiles'),
+                    team_profiles=st.session_state.get('team_profiles') if st.session_state.get('tendencies_enabled') else None,
                 )
                 snap_elapsed = time.time() - snap_start
                 st.session_state.snapshot_results = snapshot_results
@@ -1121,11 +1140,11 @@ Team Alpha,4""", language="csv")
     st.divider()
 
     # --- PROFILE STATUS INDICATOR ---
-    _sim_profiles = st.session_state.get('team_profiles')
+    _sim_profiles = st.session_state.get('team_profiles') if st.session_state.get('tendencies_enabled') else None
     if _sim_profiles:
         st.success(f"✅ Tendency profiles active — {len(_sim_profiles)} teams loaded from 📊 Player Tendencies")
     else:
-        st.info("ℹ️ No tendency profiles loaded — using default tendencies. Load profiles in the 📊 Player Tendencies tab.")
+        st.info("ℹ️ No tendency profiles active — using default tendencies. Toggle profiles on in the 📊 Player Tendencies tab.")
 
     st.divider()
 
@@ -1182,7 +1201,7 @@ Team Alpha,4""", language="csv")
                     draft_order_csv=st.session_state.draft_csv,
                     user_team_name=user_team,
                     random_seed=random_seed,
-                    team_profiles=st.session_state.get('team_profiles'),
+                    team_profiles=st.session_state.get('team_profiles') if st.session_state.get('tendencies_enabled') else None,
                 )
                 st.session_state.simulator = simulator
                 st.session_state.simulation_started = True
@@ -1607,7 +1626,7 @@ with tab5:
 1. **Upload historical draft CSVs** — Upload one or more past draft result files and assign each a year.
 2. **Run the Evaluator** — Select the years to analyze and click **Run Evaluation** to generate tendency and chaos scores.
 3. **Save Profiles** — After evaluation, click **Save Profiles** to write results to `profiles/tendencies.json`. Profiles are automatically activated across all tabs.
-4. **Load Profiles** — Or click **Load Profiles** to load previously saved profiles from disk.
+4. **Toggle Profiles** — Use the toggle below to enable or disable tendency profiles. Profiles from `profiles/tendencies.json` are loaded automatically on startup.
 """)
 
     # --- Section 1: Upload Historical Drafts ---
@@ -1693,6 +1712,7 @@ with tab5:
                 from src.tendency_evaluator import save_profiles
                 save_profiles(_prev_results)
                 st.session_state.team_profiles = {p["team_name"]: p for p in _prev_results}
+                st.session_state.tendencies_enabled = True
                 st.success("✅ Profiles saved and activated across all tabs.")
             except Exception as _save_err:
                 st.error(f"❌ Error saving profiles: {_save_err}")
@@ -1725,25 +1745,25 @@ with tab5:
 
     st.divider()
 
-    # --- Section 4: Load & Apply Profiles ---
-    st.subheader("📂 Load & Apply Profiles")
-    if st.button("📂 Load Profiles from profiles/tendencies.json", key="tendency_load_btn"):
-        try:
-            import json
-            _profiles_path = os.path.join("profiles", "tendencies.json")
-            if os.path.exists(_profiles_path):
-                with open(_profiles_path, 'r') as _pf:
-                    _loaded_profiles = json.load(_pf)
-                _profiles_list = _loaded_profiles.get("profiles", [])
-                _team_profiles = {p["team_name"]: p for p in _profiles_list}
-                st.session_state.team_profiles = _team_profiles
-                st.success(f"✅ Loaded profiles for {len(_team_profiles)} teams.")
-            else:
-                st.warning("No profiles/tendencies.json file found. Run the evaluator first.")
-        except Exception as _load_err:
-            st.error(f"❌ Error loading profiles: {_load_err}")
+    # --- Section 4: Toggle & View Profiles ---
+    st.subheader("📂 Tendency Profiles")
+    _has_profiles = bool(st.session_state.get('team_profiles'))
+    if _has_profiles:
+        _toggle_val = st.toggle(
+            "Enable tendency profiles",
+            value=st.session_state.get('tendencies_enabled', False),
+            key="tendencies_toggle",
+            help="When enabled, loaded tendency profiles are used across the Draft Room, Draft Simulator, and Snapshot Projections.",
+        )
+        st.session_state.tendencies_enabled = _toggle_val
+        if _toggle_val:
+            st.success(f"✅ Tendency profiles **enabled** — {len(st.session_state.team_profiles)} teams loaded.")
+        else:
+            st.info("ℹ️ Tendency profiles **disabled** — using default tendencies.")
+    else:
+        st.info("No profiles available. Run the evaluator and save profiles, or place a `tendencies.json` file in the `profiles/` folder.")
 
-    if 'team_profiles' in st.session_state and st.session_state.team_profiles:
+    if _has_profiles:
         st.markdown("**Loaded Team Profiles:**")
         _profile_rows = []
         for team, profile in st.session_state.team_profiles.items():
@@ -1754,4 +1774,4 @@ with tab5:
                 'Chaos Score': profile.get('chaos_score', '?'),
             })
         st.dataframe(pd.DataFrame(_profile_rows), hide_index=True)
-        st.caption("These profiles are now active across all tabs — the ⚾ Draft Room, the 🎲 Draft Simulator, and Snapshot Projections.")
+        st.caption("Toggle the switch above to enable or disable these profiles across all tabs — the ⚾ Draft Room, the 🎲 Draft Simulator, and Snapshot Projections.")

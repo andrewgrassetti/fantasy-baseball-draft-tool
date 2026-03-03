@@ -11,6 +11,7 @@ history/*/
 
 # Generated tendency profiles
 profiles/*/
+profiles/tendencies.json
 !profiles/.gitkeep
 
 # Test scripts in root (not the tests/ directory)
