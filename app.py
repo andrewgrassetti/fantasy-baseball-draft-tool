@@ -589,8 +589,8 @@ with tab1:
                 all_positions.add(p.strip())
         all_positions = sorted(all_positions)
 
-    # Position filter and sort controls
-    pos_filter_col, sort_col1, sort_col2 = st.columns([2, 2, 1])
+    # Position filter, sort controls, and player search
+    pos_filter_col, sort_col1, sort_col2, search_col = st.columns([2, 2, 1, 2])
     with pos_filter_col:
         pos_filter = st.selectbox("Filter by Position", ["All"] + all_positions, index=0, key="avail_pos_filter")
     if pos_filter != "All":
@@ -601,6 +601,11 @@ with tab1:
         sort_by = st.selectbox("Sort by", cols, index=cols.index('Dollars') if 'Dollars' in cols else 0, key="avail_sort_by")
     with sort_col2:
         sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="avail_sort_order")
+
+    with search_col:
+        player_search = st.text_input("🔍 Search Players", key="avail_search", placeholder="Search by name...")
+    if player_search:
+        df_show = df_show[df_show['Name'].str.contains(player_search, case=False, na=False)]
 
     df_show = df_show.sort_values(by=sort_by, ascending=(sort_order == "Ascending"), na_position='last')
 
@@ -1346,8 +1351,8 @@ Team Alpha,4""", language="csv")
                 sim_cols = [col for col in sim_cols if col in sim_df_show.columns]
                 sim_all_positions = sorted(sim_df_show['POS'].dropna().unique())
 
-            # Position filter and sort controls
-            sim_pos_filter_col, sim_sort_col1, sim_sort_col2 = st.columns([2, 2, 1])
+            # Position filter, sort controls, and player search
+            sim_pos_filter_col, sim_sort_col1, sim_sort_col2, sim_search_col = st.columns([2, 2, 1, 2])
             with sim_pos_filter_col:
                 sim_pos_filter = st.selectbox("Filter by Position", ["All"] + sim_all_positions, index=0, key="sim_pos_filter")
             if sim_pos_filter != "All":
@@ -1357,6 +1362,11 @@ Team Alpha,4""", language="csv")
                 sim_sort_by = st.selectbox("Sort by", sim_cols, index=sim_cols.index('Dollars') if 'Dollars' in sim_cols else 0, key="sim_sort_by")
             with sim_sort_col2:
                 sim_sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="sim_sort_order")
+
+            with sim_search_col:
+                sim_player_search = st.text_input("🔍 Search Players", key="sim_search", placeholder="Search by name...")
+            if sim_player_search:
+                sim_df_show = sim_df_show[sim_df_show['Name'].str.contains(sim_player_search, case=False, na=False)]
 
             sim_df_show = sim_df_show.sort_values(by=sim_sort_by, ascending=(sim_sort_order == "Ascending"), na_position='last')
 
