@@ -474,12 +474,20 @@ with tab1:
     _auto_drafter = None
     _auto_pick_number = None
     _is_user_turn = False
+    _picks_until_turn = None
     if _draft_order_df is not None:
         _auto_pick_index = engine.get_total_picks_made()
         if _auto_pick_index < len(_draft_order_df):
             _auto_drafter = _draft_order_df.iloc[_auto_pick_index]['player_name']
             _auto_pick_number = int(_draft_order_df.iloc[_auto_pick_index]['pick_number'])
             _is_user_turn = (_auto_drafter == st.session_state.get('user_team_name'))
+        # Calculate picks until user's next turn
+        _user_team = st.session_state.get('user_team_name')
+        if _user_team and _auto_pick_index < len(_draft_order_df):
+            _remaining = _draft_order_df.iloc[_auto_pick_index:]
+            _user_mask = _remaining['player_name'] == _user_team
+            if _user_mask.any():
+                _picks_until_turn = int(_user_mask.values.argmax())
 
     if _auto_drafter:
         if _is_user_turn:
@@ -640,6 +648,10 @@ with tab1:
                     st.toast(f"Added {sel['Name']} to queue!")
                 else:
                     st.toast(f"{sel['Name']} is already in the queue.")
+
+        # Picks until user's turn indicator (skip when it's already the user's turn)
+        if _picks_until_turn is not None and _picks_until_turn > 0:
+            st.caption(f"⏳ Picks left until your turn: **{_picks_until_turn}**")
 
         # 4. Draft Queue panel
         if st.session_state.draft_queue:
