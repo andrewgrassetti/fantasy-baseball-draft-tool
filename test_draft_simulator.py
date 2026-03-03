@@ -888,6 +888,204 @@ def test_profile_passed_to_snapshot():
     return passed
 
 
+def test_sp_bench_phase_boost():
+    """When all non-bench slots are filled, SP candidates should be strongly
+    favoured for bench picks, and the preference should grow as more bench
+    slots are occupied by non-pitchers.
+
+    Setup:
+    - Fill every non-bench roster slot (C, 1B, 2B, 3B, SS, OF*3, Util*2,
+      SP*3, RP*2, P*1 = 16 players).
+    - Leave all 6 bench slots open.
+    - Offer one high-value SP and several similarly-valued batters.
+    - Verify the SP is picked at a much higher rate than uniform chance.
+    """
+    from src.models import Player
+    print("\n" + "=" * 60)
+    print("TEST: SP bench-phase boost when filling bench slots")
+    print("=" * 60)
+
+    # --- Build large enough player pools so slots can be filled ---
+    # 10 batters for non-bench + 8 extras for the available pool
+    batter_positions = (
+        ['C', '1B', '2B', '3B', 'SS'] + ['OF'] * 3 + ['OF'] * 2  # 10 non-bench
+        + ['OF'] * 8  # bench candidates
+    )
+    n_bat = len(batter_positions)
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(3000 + i) for i in range(n_bat)],
+        'Name': [f'Bat_{i}' for i in range(n_bat)],
+        'POS': batter_positions,
+        'Team': ['NYY'] * n_bat,
+        'AB': [500] * n_bat,
+        'R': [70] * n_bat,
+        'HR': [20] * n_bat,
+        'RBI': [65] * n_bat,
+        'SB': [8] * n_bat,
+        'OBP': [0.330] * n_bat,
+        'WAR': [2.0] * n_bat,
+        'Dollars': [50 - i * 2 for i in range(n_bat)],
+    })
+
+    # 6 pitchers for non-bench slots + 1 high-value SP as bench candidate
+    pitcher_positions = ['SP'] * 3 + ['RP'] * 2 + ['SP'] + ['SP']
+    n_pitch = len(pitcher_positions)
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(4000 + i) for i in range(n_pitch)],
+        'Name': [f'Pit_{i}' for i in range(n_pitch)],
+        'POS': pitcher_positions,
+        'Team': ['LAD'] * n_pitch,
+        'IP': [180] * n_pitch,
+        'SO': [200] * n_pitch,
+        'ERA': [3.50] * n_pitch,
+        'WHIP': [1.15] * n_pitch,
+        'WAR': [4.0] * n_pitch,
+        'SV': [0] * n_pitch,
+        'QS': [15] * n_pitch,
+        'Dollars': [40 - i * 2 for i in range(n_pitch)],
+    })
+
+    team_names = ['TestTeam', 'Filler']
+
+    def _make_player(row, is_pitcher):
+        return Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row['Team'],
+            dollars=row.get('Dollars', 0),
+            stats=row.to_dict(),
+            is_pitcher=is_pitcher,
+        )
+
+    # Run trials: for each trial, create a fresh sim, fill TestTeam's non-bench,
+    # then simulate one pick and check whether the SP is chosen.
+    csv = 'player_name,pick_number\nTestTeam,1'
+    sp_pick_count = 0
+    num_trials = 200
+
+    for trial in range(num_trials):
+        engine = DraftEngine(bat_df.copy(), pitch_df.copy(), team_names=team_names)
+        sim = DraftSimulator(engine, csv, user_team_name='Filler', random_seed=trial, snapshot_mode=True)
+        sim_team = sim.engine.teams['TestTeam']
+
+        # Fill non-bench: 10 batters + 6 pitchers
+        for i in range(10):
+            row = bat_df.iloc[i]
+            sim_team.add_player(_make_player(row, False))
+            sim.engine.bat_df.loc[sim.engine.bat_df['PlayerId'] == str(row['PlayerId']), 'Status'] = 'TestTeam'
+        for i in range(6):
+            row = pitch_df.iloc[i]
+            sim_team.add_player(_make_player(row, True))
+            sim.engine.pitch_df.loc[sim.engine.pitch_df['PlayerId'] == str(row['PlayerId']), 'Status'] = 'TestTeam'
+
+        result = sim.simulate_next_pick()
+        if result and result['name'] == 'Pit_6':
+            sp_pick_count += 1
+
+    pct = sp_pick_count / num_trials * 100
+    uniform_pct = 100.0 / 9  # ~9 candidates remain
+    print(f"  SP Pit_6 ($28) picked in {sp_pick_count}/{num_trials} trials ({pct:.1f}%)")
+    print(f"  Uniform chance: {uniform_pct:.1f}%")
+    print(f"  Selection rate vs uniform: {pct / uniform_pct:.1f}x")
+
+    if pct > uniform_pct * 3:
+        print("  \u2705 PASSED: SP bench-phase boost strongly favours starting pitchers")
+        return True
+    else:
+        print("  \u274c FAILED: SP not sufficiently favoured for bench spots")
+        return False
+
+
+def test_sp_bench_boost_increases_with_non_pitchers():
+    """The SP bench boost should grow stronger as more bench slots are
+    occupied by non-pitchers.
+
+    We directly call _sp_bench_phase_boost with varying numbers of bench
+    non-pitchers and verify the multiplier increases monotonically.
+    """
+    from src.models import Player
+    print("\n" + "=" * 60)
+    print("TEST: SP bench boost increases with bench non-pitchers")
+    print("=" * 60)
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(5000 + i) for i in range(18)],
+        'Name': [f'B{i}' for i in range(18)],
+        'POS': ['C', '1B', '2B', '3B', 'SS'] + ['OF'] * 3 + ['OF'] * 2 + ['OF'] * 8,
+        'Team': ['NYY'] * 18,
+        'AB': [500] * 18, 'R': [70] * 18, 'HR': [20] * 18, 'RBI': [65] * 18,
+        'SB': [8] * 18, 'OBP': [0.330] * 18, 'WAR': [2.0] * 18,
+        'Dollars': [30] * 18,
+    })
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(6000 + i) for i in range(10)],
+        'Name': [f'P{i}' for i in range(10)],
+        'POS': ['SP'] * 3 + ['RP'] * 2 + ['SP'] + ['SP'] * 4,
+        'Team': ['LAD'] * 10,
+        'IP': [180] * 10, 'SO': [200] * 10, 'ERA': [3.50] * 10,
+        'WHIP': [1.15] * 10, 'WAR': [4.0] * 10, 'SV': [0] * 10, 'QS': [15] * 10,
+        'Dollars': [30] * 10,
+    })
+
+    team_names = ['BenchTeam', 'Other']
+    engine = DraftEngine(bat_df.copy(), pitch_df.copy(), team_names=team_names)
+    csv = 'player_name,pick_number\nBenchTeam,1\nOther,2'
+    sim = DraftSimulator(engine, csv, user_team_name='Other', random_seed=42)
+    team = sim.engine.teams['BenchTeam']
+
+    def _make_player(row, is_pitcher):
+        return Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row['Team'],
+            dollars=row.get('Dollars', 0),
+            stats=row.to_dict(),
+            is_pitcher=is_pitcher,
+        )
+
+    # Fill all non-bench slots (10 batters + 6 pitchers)
+    for i in range(10):
+        team.add_player(_make_player(bat_df.iloc[i], False))
+    for i in range(6):
+        team.add_player(_make_player(pitch_df.iloc[i], True))
+
+    # Verify non-bench full, bench empty
+    for slot in ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']:
+        assert team.slots_filled[slot] == team.SLOT_LIMITS[slot], f"{slot} not filled"
+    assert team.slots_filled['BN'] == 0
+
+    # Collect boost values as we add non-pitcher bench players
+    boosts = []
+    boost_0 = sim._sp_bench_phase_boost('BenchTeam', True, 'SP')
+    boosts.append(boost_0)
+    print(f"  Bench non-pitchers=0: boost={boost_0:.2f}")
+
+    for j in range(4):
+        team.add_player(_make_player(bat_df.iloc[10 + j], False))
+        b = sim._sp_bench_phase_boost('BenchTeam', True, 'SP')
+        boosts.append(b)
+        print(f"  Bench non-pitchers={j + 1}: boost={b:.2f}")
+
+    # Verify monotonically increasing
+    passed = all(boosts[i] < boosts[i + 1] for i in range(len(boosts) - 1))
+    # Verify boost > 1.0 for all entries
+    passed = passed and all(b > 1.0 for b in boosts)
+    # Verify no boost for non-pitcher candidate
+    no_boost = sim._sp_bench_phase_boost('BenchTeam', False, 'OF')
+    passed = passed and no_boost == 1.0
+    # Verify no boost for RP candidate
+    rp_no_boost = sim._sp_bench_phase_boost('BenchTeam', True, 'RP')
+    passed = passed and rp_no_boost == 1.0
+
+    if passed:
+        print("  \u2705 PASSED: SP boost increases monotonically with bench non-pitchers")
+    else:
+        print("  \u274c FAILED: SP boost does not increase correctly")
+    return passed
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
@@ -907,6 +1105,8 @@ if __name__ == '__main__':
     t12 = test_backward_compat_old_csv_format()
     t13 = test_new_2col_csv_format()
     t14 = test_profile_passed_to_snapshot()
+    t15 = test_sp_bench_phase_boost()
+    t16 = test_sp_bench_boost_increases_with_non_pitchers()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -925,8 +1125,10 @@ if __name__ == '__main__':
     print(f"Test 12 (Backward compat old CSV): {'✅ PASSED' if t12 else '❌ FAILED'}")
     print(f"Test 13 (New 2-column CSV): {'✅ PASSED' if t13 else '❌ FAILED'}")
     print(f"Test 14 (Profile passed to snapshot): {'✅ PASSED' if t14 else '❌ FAILED'}")
+    print(f"Test 15 (SP bench-phase boost): {'✅ PASSED' if t15 else '❌ FAILED'}")
+    print(f"Test 16 (SP boost increases with non-pitchers): {'✅ PASSED' if t16 else '❌ FAILED'}")
 
-    all_passed = t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9 and t10 and t11 and t12 and t13 and t14
+    all_passed = t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9 and t10 and t11 and t12 and t13 and t14 and t15 and t16
     if all_passed:
         print("\n🎉 ALL TESTS PASSED!")
         sys.exit(0)
