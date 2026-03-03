@@ -10,6 +10,7 @@ Provides probabilistic draft simulation functionality that:
   3. Category need (LOW weight)
   4. Player tendency (LOW weight)
   5. Position redundancy penalty (multiplicative — see below)
+  6. SP bench-phase boost (multiplicative — see below)
 
 While flex slots (Util, P, BN) remain open, the AI considers ALL
 available players regardless of position so that high-value players
@@ -53,6 +54,12 @@ is designed to de-prioritize it.
 
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
+
+SP bench-phase boost: once every non-bench roster slot is filled, starting
+pitchers receive a multiplicative score boost to steer bench picks toward
+elite SP.  The boost grows linearly as more bench slots are occupied by
+non-pitchers, controlled by SP_BENCH_BOOST_BASE and
+SP_BENCH_BOOST_PER_NON_PITCHER.
 """
 
 import logging
@@ -157,6 +164,16 @@ class DraftSimulator:
     # highest raw dollar values, which would negate the positional weighting
     # designed to de-prioritize that position.
     MAX_PER_POSITION_IN_SHORTLIST = 2
+    
+    # --- SP bench-phase boost ---
+    # Once all non-bench roster slots are filled, starting pitchers receive a
+    # score multiplier to strongly encourage drafting them over position players
+    # for bench spots.  The boost increases as more bench slots are occupied by
+    # non-pitchers.
+    #   effective_boost = SP_BENCH_BOOST_BASE
+    #                     + bench_non_pitchers * SP_BENCH_BOOST_PER_NON_PITCHER
+    SP_BENCH_BOOST_BASE = 2.0             # Multiplier when bench filling begins
+    SP_BENCH_BOOST_PER_NON_PITCHER = 0.5  # Additional multiplier per bench non-pitcher
     
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None, team_profiles: Optional[Dict[str, Dict]] = None):
         """Initialize the draft simulator.
@@ -729,6 +746,11 @@ class DraftSimulator:
             primary_pos = position.split('/')[0].strip()
             score *= self.POSITION_PRIORITY.get(primary_pos, 1.0)
         
+        # Factor 7: SP bench-phase boost — when all non-bench slots are filled,
+        # strongly favour starting pitchers for bench spots, increasingly so as
+        # more bench slots are occupied by non-pitchers.
+        score *= self._sp_bench_phase_boost(team_name, is_pitcher, player_row['POS'])
+        
         return max(score, 0.0)  # Ensure non-negative
     
     def _calculate_positional_need(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
@@ -867,6 +889,54 @@ class DraftSimulator:
         positions = [p.strip() for p in str(position_str).split('/')]
         return any(p in needed_positions for p in positions)
     
+    def _sp_bench_phase_boost(self, team_name: str, is_pitcher: bool, position: str) -> float:
+        """Return a score multiplier that boosts SP candidates when the team
+        is filling bench slots, increasing as more bench slots hold non-pitchers.
+
+        The boost activates only when ALL non-bench roster slots (C, 1B, 2B, 3B,
+        SS, OF, Util, SP, RP, P) are filled and the candidate is an SP-eligible
+        pitcher.  It grows linearly with the number of non-pitcher bench players.
+
+        Args:
+            team_name: Name of the drafting team.
+            is_pitcher: Whether the candidate is a pitcher.
+            position: Position string of the candidate (e.g. 'SP', 'SP/RP').
+
+        Returns:
+            Multiplier >= 1.0 (1.0 = no boost).
+        """
+        if not is_pitcher:
+            return 1.0
+
+        # Only boost SP-eligible candidates
+        if pd.isna(position) or 'SP' not in str(position):
+            return 1.0
+
+        team = self.engine.teams[team_name]
+
+        # Check that every non-bench slot is filled
+        non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']
+        for slot in non_bench_slots:
+            if team.slots_filled.get(slot, 0) < team.SLOT_LIMITS.get(slot, 0):
+                return 1.0  # Still have non-bench slots open
+
+        bn_filled = team.slots_filled.get('BN', 0)
+        bn_limit = team.SLOT_LIMITS.get('BN', 0)
+        if bn_filled >= bn_limit:
+            return 1.0  # Bench is full — nothing left to fill
+
+        # Count how many bench players are non-pitchers
+        total_pitchers = sum(1 for p in team.roster if p.is_pitcher)
+        pitchers_in_named_slots = (
+            team.slots_filled.get('SP', 0)
+            + team.slots_filled.get('RP', 0)
+            + team.slots_filled.get('P', 0)
+        )
+        bench_pitchers = max(total_pitchers - pitchers_in_named_slots, 0)
+        bench_non_pitchers = max(bn_filled - bench_pitchers, 0)
+
+        return self.SP_BENCH_BOOST_BASE + bench_non_pitchers * self.SP_BENCH_BOOST_PER_NON_PITCHER
+
     def _position_diverse_shortlist(self, candidates: List[Dict]) -> List[Dict]:
         """Build a shortlist of up to SHORTLIST_PER_TYPE candidates while
         limiting any single fielding position to MAX_PER_POSITION_IN_SHORTLIST
@@ -1003,11 +1073,19 @@ class DraftSimulator:
             scores += cat_scores * self.WEIGHT_CATEGORY_NEED
 
         # --- Apply position-dependent additive and multiplicative factors ---
+        # Pre-compute SP bench-phase boost (constant for all candidates of same type)
+        sp_boost_map: Dict[str, float] = {}
+        if is_pitcher:
+            for pos_str in unique_positions:
+                sp_boost_map[pos_str] = self._sp_bench_phase_boost(team_name, True, pos_str)
+
         for i in range(n):
             pos = positions[i]
             scores[i] += pos_need_map[pos] * self.WEIGHT_POSITIONAL_NEED
             scores[i] *= redundancy_map[pos]
             scores[i] *= priority_map[pos]
+            if is_pitcher:
+                scores[i] *= sp_boost_map[pos]
 
         np.maximum(scores, 0.0, out=scores)
 
