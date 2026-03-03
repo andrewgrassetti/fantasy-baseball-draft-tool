@@ -1086,6 +1086,145 @@ def test_sp_bench_boost_increases_with_non_pitchers():
     return passed
 
 
+def _make_batter(player_id, dollars, stats=None):
+    """Helper: create a batter Player for live_totals tests."""
+    from src.models import Player
+    return Player(
+        player_id=str(player_id),
+        name=f'Batter {player_id}',
+        position='OF',
+        team_mlb='NYY',
+        dollars=float(dollars),
+        stats=stats or {'R': 10, 'HR': 5, 'RBI': 20, 'SB': 2, 'AB': 100, 'OBP': 0.350},
+        is_pitcher=False,
+    )
+
+
+def _make_pitcher(player_id, dollars, position='SP', stats=None):
+    """Helper: create a pitcher Player for live_totals tests."""
+    from src.models import Player
+    return Player(
+        player_id=str(player_id),
+        name=f'Pitcher {player_id}',
+        position=position,
+        team_mlb='LAD',
+        dollars=float(dollars),
+        stats=stats or {'SO': 100, 'SV': 0, 'QS': 10, 'IP': 60, 'ERA': 3.00, 'WHIP': 1.10},
+        is_pitcher=True,
+    )
+
+
+def test_live_totals_bench_batters_excluded():
+    """Bench batters (beyond top 10 by dollars) must NOT contribute to live_totals."""
+    from src.models import Team
+
+    team = Team(owner_name='TestTeam')
+
+    # Add 12 batters: top 10 each have R=10, bottom 2 have R=50 but dollars=0
+    for i in range(10):
+        team.add_player(_make_batter(i, dollars=20 - i, stats={
+            'R': 10, 'HR': 5, 'RBI': 20, 'SB': 2, 'AB': 100, 'OBP': 0.350
+        }))
+    # Two bench batters with large R but $0
+    for i in range(10, 12):
+        team.add_player(_make_batter(i, dollars=0, stats={
+            'R': 50, 'HR': 30, 'RBI': 100, 'SB': 20, 'AB': 100, 'OBP': 0.400
+        }))
+
+    totals = team.live_totals
+    # Only top 10 should count: 10 * R=10 = 100
+    assert totals['R'] == 100, f"Expected R=100, got {totals['R']}"
+    assert totals['HR'] == 50, f"Expected HR=50, got {totals['HR']}"
+
+
+def test_live_totals_all_sps_included():
+    """ALL SPs on the roster should contribute regardless of active SP slot count."""
+    from src.models import Team
+
+    team = Team(owner_name='TestTeam')
+
+    # Add more SPs than SLOT_LIMITS['SP'] (which is 3) -- add 6 SPs
+    for i in range(6):
+        team.add_player(_make_pitcher(i, dollars=30 - i, position='SP', stats={
+            'SO': 10, 'SV': 0, 'QS': 1, 'IP': 10, 'ERA': 3.00, 'WHIP': 1.10
+        }))
+
+    totals = team.live_totals
+    # All 6 SPs should count
+    assert totals['K'] == 60, f"Expected K=60, got {totals['K']}"
+    assert totals['QS'] == 6, f"Expected QS=6, got {totals['QS']}"
+
+
+def test_live_totals_bench_rps_excluded():
+    """Bench RPs (beyond top 3 by dollars) must NOT contribute to live_totals."""
+    from src.models import Team
+
+    team = Team(owner_name='TestTeam')
+
+    # Add 5 RPs: top 3 have SO=10, bottom 2 have SO=100 but dollars=0
+    for i in range(3):
+        team.add_player(_make_pitcher(i, dollars=15 - i, position='RP', stats={
+            'SO': 10, 'SV': 1, 'QS': 0, 'IP': 20, 'ERA': 2.50, 'WHIP': 1.00
+        }))
+    for i in range(3, 5):
+        team.add_player(_make_pitcher(i, dollars=0, position='RP', stats={
+            'SO': 100, 'SV': 50, 'QS': 0, 'IP': 20, 'ERA': 2.50, 'WHIP': 1.00
+        }))
+
+    totals = team.live_totals
+    # Only top 3 RPs should count: 3 * SO=10 = 30
+    assert totals['K'] == 30, f"Expected K=30, got {totals['K']}"
+    assert totals['SV'] == 3, f"Expected SV=3, got {totals['SV']}"
+
+
+def test_live_totals_sp_rp_mixed_position():
+    """Players with 'SP/RP' in position string should be treated as SPs (all included)."""
+    from src.models import Team
+
+    team = Team(owner_name='TestTeam')
+
+    # Add 4 SP/RP players (all count as SPs)
+    for i in range(4):
+        team.add_player(_make_pitcher(i, dollars=20 - i, position='SP/RP', stats={
+            'SO': 10, 'SV': 2, 'QS': 1, 'IP': 15, 'ERA': 3.00, 'WHIP': 1.10
+        }))
+
+    totals = team.live_totals
+    # All 4 SP/RP players should count since 'SP' is in their position
+    assert totals['K'] == 40, f"Expected K=40, got {totals['K']}"
+    assert totals['QS'] == 4, f"Expected QS=4, got {totals['QS']}"
+
+
+def test_live_totals_writein_batters_excluded():
+    """Write-in batters (dollars=0, empty stats) sort to bottom and are excluded."""
+    from src.models import Team, Player
+
+    team = Team(owner_name='TestTeam')
+
+    # Add 10 real batters with dollars > 0
+    for i in range(10):
+        team.add_player(_make_batter(i, dollars=20 - i, stats={
+            'R': 10, 'HR': 5, 'RBI': 20, 'SB': 2, 'AB': 100, 'OBP': 0.350
+        }))
+
+    # Add a write-in batter (dollars=0, empty stats)
+    writein = Player(
+        player_id='wi-1',
+        name='Write-in Batter',
+        position='OF',
+        team_mlb='',
+        dollars=0.0,
+        stats={},
+        is_pitcher=False,
+        is_writein=True,
+    )
+    team.add_player(writein)
+
+    totals = team.live_totals
+    # Write-in contributes nothing; only the top 10 active batters count
+    assert totals['R'] == 100, f"Expected R=100, got {totals['R']}"
+
+
 if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("DRAFT SIMULATOR SCORING TEST SUITE")
