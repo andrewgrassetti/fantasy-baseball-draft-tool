@@ -175,18 +175,71 @@ class Team:
 
     @property
     def live_totals(self) -> Dict[str, float]:
-        """Returns the 5x5 category totals from incremental cache."""
+        """Returns the 5x5 category totals, counting only active-slot players.
+
+        Batters: top active_bat_slots by dollars descending (bench excluded).
+        SPs:     all rostered SPs (can rotate into active slot on start days).
+        RPs:     top active_rp_slots by dollars descending (bench RPs excluded).
+        """
+        # Derive active slot counts from SLOT_LIMITS
+        bat_positions = {'C', '1B', '2B', '3B', 'SS', 'OF', 'Util'}
+        active_bat_slots = sum(v for k, v in self.SLOT_LIMITS.items() if k in bat_positions)
+        active_rp_slots = self.SLOT_LIMITS.get('RP', 0) + self.SLOT_LIMITS.get('P', 0)
+
+        # Partition roster into batters, SPs, and RPs
+        batters = [p for p in self.roster if not p.is_pitcher]
+        sps = [p for p in self.roster if p.is_pitcher and 'SP' in str(p.position)]
+        rps = [p for p in self.roster if p.is_pitcher and 'SP' not in str(p.position)]
+
+        # Select active players
+        active_batters = sorted(batters, key=lambda p: p.dollars, reverse=True)[:active_bat_slots]
+        active_rps = sorted(rps, key=lambda p: p.dollars, reverse=True)[:active_rp_slots]
+        active_pitchers = sps + active_rps
+
+        # Accumulate stats for active players only
+        stats_acc = {'R': 0, 'HR': 0, 'RBI': 0, 'SB': 0, 'K': 0, 'SV': 0, 'QS': 0}
+        total_ab = 0
+        total_on_base = 0.0
+        total_ip = 0.0
+        total_er = 0.0
+        total_wh = 0.0
+
+        for p in active_batters:
+            s = p.stats
+            stats_acc['R'] += s.get('R', 0)
+            stats_acc['HR'] += s.get('HR', 0)
+            stats_acc['RBI'] += s.get('RBI', 0)
+            stats_acc['SB'] += s.get('SB', 0)
+            ab = s.get('AB', 0)
+            obp = s.get('OBP', 0)
+            if ab > 0:
+                total_ab += ab
+                total_on_base += obp * ab
+
+        for p in active_pitchers:
+            s = p.stats
+            stats_acc['K'] += s.get('SO', 0)
+            stats_acc['SV'] += s.get('SV', 0)
+            stats_acc['QS'] += s.get('QS', 0)
+            ip = s.get('IP', 0)
+            era = s.get('ERA', 0)
+            whip = s.get('WHIP', 0)
+            if ip > 0:
+                total_ip += ip
+                total_er += (era * ip) / 9
+                total_wh += whip * ip
+
         totals = {
-            'R': self._incr['R'], 'HR': self._incr['HR'],
-            'RBI': self._incr['RBI'], 'SB': self._incr['SB'], 'OBP': 0.000,
-            'K': self._incr['K'], 'SV': self._incr['SV'],
-            'QS': self._incr['QS'], 'ERA': 0.00, 'WHIP': 0.00
+            'R': stats_acc['R'], 'HR': stats_acc['HR'],
+            'RBI': stats_acc['RBI'], 'SB': stats_acc['SB'], 'OBP': 0.000,
+            'K': stats_acc['K'], 'SV': stats_acc['SV'],
+            'QS': stats_acc['QS'], 'ERA': 0.00, 'WHIP': 0.00
         }
 
-        if self._total_ab > 0:
-            totals['OBP'] = round(self._total_on_base / self._total_ab, 3)
-        if self._total_ip > 0:
-            totals['ERA'] = round((self._total_er * 9) / self._total_ip, 2)
-            totals['WHIP'] = round(self._total_wh / self._total_ip, 2)
+        if total_ab > 0:
+            totals['OBP'] = round(total_on_base / total_ab, 3)
+        if total_ip > 0:
+            totals['ERA'] = round((total_er * 9) / total_ip, 2)
+            totals['WHIP'] = round(total_wh / total_ip, 2)
 
         return totals
