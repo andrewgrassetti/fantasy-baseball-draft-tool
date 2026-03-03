@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import json
 import time
 import os
 import random
@@ -51,9 +52,8 @@ if 'team_profiles' not in st.session_state:
     _auto_profiles_path = os.path.join("profiles", "tendencies.json")
     if os.path.exists(_auto_profiles_path):
         try:
-            import json as _json_auto
             with open(_auto_profiles_path, 'r') as _apf:
-                _auto_loaded = _json_auto.load(_apf)
+                _auto_loaded = json.load(_apf)
             _auto_profiles_list = _auto_loaded.get("profiles", [])
             st.session_state.team_profiles = {p["team_name"]: p for p in _auto_profiles_list}
         except Exception:
@@ -1626,7 +1626,7 @@ with tab5:
 1. **Upload historical draft CSVs** — Upload one or more past draft result files and assign each a year.
 2. **Run the Evaluator** — Select the years to analyze and click **Run Evaluation** to generate tendency and chaos scores.
 3. **Save Profiles** — After evaluation, click **Save Profiles** to write results to `profiles/tendencies.json`. Profiles are automatically activated across all tabs.
-4. **Toggle Profiles** — Use the toggle below to enable or disable tendency profiles. Profiles from `profiles/tendencies.json` are loaded automatically on startup.
+4. **Toggle Profiles** — Use the toggle in the **Tendency Profiles** section below to enable or disable tendency profiles. Profiles from `profiles/tendencies.json` are loaded automatically on startup.
 """)
 
     # --- Section 1: Upload Historical Drafts ---
