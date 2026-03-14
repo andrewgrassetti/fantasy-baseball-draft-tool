@@ -115,8 +115,8 @@ def load_and_merge_data(data_dir="data"):
         "2026_zips_pitch.csv", "2026_oopsy_pitch.csv"
     ]
     
-    auction_bat_files = ["2026_batx_auction_bat.csv", "2026_oopsy_auction_bat.csv"]
-    auction_pitch_files = ["2026_oopsy_auction_pitch.csv", "2026_batx_auction_pitch.csv"]
+    auction_bat_files = ["2026_ATC_auction_bat.csv"]
+    auction_pitch_files = ["2026_ATC_auction_pitch.csv"]
     
     # Extract year from projection files and use previous year for statcast
     # Statcast data is always from the prior season
