@@ -953,7 +953,7 @@ with tab2:
     st.header("Player Value Visualization")
     
     # Controls
-    col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
+    col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns(4)
     
     with col_ctrl1:
         plot_type = st.radio("Player Type", ["Batters", "Pitchers"], horizontal=True)
@@ -964,18 +964,32 @@ with tab2:
         numeric_cols = ['ADP', 'HR', 'RBI', 'R', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'Dollars']
         default_x = 'ADP'
         default_y = 'HR'
+        all_positions = set()
+        for pos in plot_df['POS'].dropna().unique():
+            for p in str(pos).split('/'):
+                all_positions.add(p.strip())
+        all_positions = sorted(all_positions)
     else:
         plot_df = engine.pitch_df.copy()
         numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'K/9', 'WAR', 'IP', 'Dollars']
         default_x = 'ADP'
         default_y = 'ERA'
+        all_positions = sorted(plot_df['POS'].dropna().unique().tolist())
 
     with col_ctrl2:
         x_axis = st.selectbox("X Axis", numeric_cols, index=numeric_cols.index(default_x) if default_x in numeric_cols else 0)
         
     with col_ctrl3:
         y_axis = st.selectbox("Y Axis", numeric_cols, index=numeric_cols.index(default_y) if default_y in numeric_cols else 0)
-    
+
+    with col_ctrl4:
+        pos_filter = st.selectbox("Filter by Position", ["All"] + all_positions, index=0, key="market_pos_filter")
+
+    if pos_filter != "All":
+        plot_df = plot_df[plot_df['POS'].fillna('').apply(lambda x: pos_filter in [p.strip() for p in str(x).split('/')])]
+
+    plot_title = f"{y_axis} vs {x_axis} ({plot_type} — {pos_filter})" if pos_filter != "All" else f"{y_axis} vs {x_axis} ({plot_type})"
+
     # Color Logic: Define a map for Status
     # Available = Blue, Drafted = Red (Low opacity)
     color_discrete_map = {'Available': '#1f77b4', 'Drafted': '#d62728'}
@@ -989,7 +1003,7 @@ with tab2:
         color_discrete_map=color_discrete_map,
         hover_name='Name',
         hover_data=['Team', 'POS', 'Status'],
-        title=f"{y_axis} vs {x_axis} ({plot_type})",
+        title=plot_title,
         template="plotly_white",
         height=600
     )
@@ -1549,7 +1563,7 @@ Team Alpha,4""", language="csv")
             st.divider()
             st.subheader("Player Value Visualization")
             
-            col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
+            col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns(4)
             
             with col_ctrl1:
                 sim_plot_type = st.radio("Player Type", ["Batters", "Pitchers"], horizontal=True, key="sim_plot_type")
@@ -1559,11 +1573,17 @@ Team Alpha,4""", language="csv")
                 sim_numeric_cols = ['ADP', 'HR', 'RBI', 'R', 'SB', 'OBP', 'wOBA', 'WAR', 'wRC+', 'maxEV', 'Barrel_prc', 'Dollars']
                 sim_default_x = 'ADP'
                 sim_default_y = 'HR'
+                sim_all_positions = set()
+                for pos in sim_plot_df['POS'].dropna().unique():
+                    for p in str(pos).split('/'):
+                        sim_all_positions.add(p.strip())
+                sim_all_positions = sorted(sim_all_positions)
             else:
                 sim_plot_df = simulator.engine.pitch_df.copy()
                 sim_numeric_cols = ['ADP', 'ERA', 'WHIP', 'SO', 'SV', 'QS', 'K/9', 'WAR', 'IP', 'Dollars']
                 sim_default_x = 'ADP'
                 sim_default_y = 'ERA'
+                sim_all_positions = sorted(sim_plot_df['POS'].dropna().unique().tolist())
             
             sim_numeric_cols = [col for col in sim_numeric_cols if col in sim_plot_df.columns]
             
@@ -1572,7 +1592,15 @@ Team Alpha,4""", language="csv")
             
             with col_ctrl3:
                 sim_y_axis = st.selectbox("Y Axis", sim_numeric_cols, index=sim_numeric_cols.index(sim_default_y) if sim_default_y in sim_numeric_cols else 0, key="sim_y_axis")
-            
+
+            with col_ctrl4:
+                sim_pos_filter = st.selectbox("Filter by Position", ["All"] + sim_all_positions, index=0, key="sim_market_pos_filter")
+
+            if sim_pos_filter != "All":
+                sim_plot_df = sim_plot_df[sim_plot_df['POS'].fillna('').apply(lambda x: sim_pos_filter in [p.strip() for p in str(x).split('/')])]
+
+            sim_plot_title = f"{sim_y_axis} vs {sim_x_axis} ({sim_plot_type} — {sim_pos_filter})" if sim_pos_filter != "All" else f"{sim_y_axis} vs {sim_x_axis} ({sim_plot_type})"
+
             sim_color_map = {'Available': '#1f77b4', 'Drafted': '#d62728', 'Keeper': '#2ca02c'}
             
             sim_fig = px.scatter(
@@ -1583,7 +1611,7 @@ Team Alpha,4""", language="csv")
                 color_discrete_map=sim_color_map,
                 hover_name='Name',
                 hover_data=['Team', 'POS', 'Status'],
-                title=f"{sim_y_axis} vs {sim_x_axis} ({sim_plot_type})",
+                title=sim_plot_title,
                 template="plotly_white",
                 height=600
             )
