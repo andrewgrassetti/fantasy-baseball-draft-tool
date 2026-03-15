@@ -140,13 +140,13 @@ class DraftSimulator:
     # because they are more likely to provide Util/bench value.
     POSITION_REDUNDANCY = {
         'C':  [1.0, 0.04, 0.01],              # 1 C slot; 2nd C is rare, 3rd almost never
-        'SS': [1.0, 0.35, 0.08],              # 1 SS slot
-        '2B': [1.0, 0.35, 0.08],              # 1 2B slot
-        '3B': [1.0, 0.35, 0.08],              # 1 3B slot
+        'SS': [1.0, 0.35, 0.1],              # 1 SS slot
+        '2B': [1.0, 0.35, 0.1],              # 1 2B slot
+        '3B': [1.0, 0.35, 0.2],              # 1 3B slot
         '1B': [1.0, 0.55, 0.25],              # 1 1B slot; power bats fine as Util
         'OF': [1.0, 1.0, 1.0, 0.55, 0.25],    # 3 OF slots; extras are OK
-        'SP': [1.0, 1.0, 1.0, 0.65, 0.35],    # 3 SP slots
-        'RP': [1.0, 1.0, 0.45, 0.15],          # 2 RP slots
+        'SP': [1.0, 1.0, 1.0, 0.75, 0.65, 0.55, 0.55, 0.55, 0.45],    # 3 SP slots
+        'RP': [1.0, 1.0, 0.45, 0.1],          # 2 RP slots
     }
     
     # Exponent applied to dollar values before scoring.  Values > 1 widen the
@@ -157,21 +157,21 @@ class DraftSimulator:
     EPSILON = 0.01
     
     # Maximum number of top players (by Dollar value) to consider per pick
-    TOP_N_PLAYERS = 50
+    TOP_N_PLAYERS = 75
     
     # Maximum number of top-scored candidates to shortlist per position type
     # (batters and pitchers separately) before probabilistic selection.
     # This ensures that within each position type, value ordering is respected
     # and prevents lower-value players at a position from being drafted before
     # higher-value ones.
-    SHORTLIST_PER_TYPE = 5
+    SHORTLIST_PER_TYPE = 10
     
     # Maximum number of candidates from any single fielding position allowed
     # in the shortlist.  This prevents a single position (e.g. catcher) from
     # monopolizing the batter shortlist when its players happen to have the
     # highest raw dollar values, which would negate the positional weighting
     # designed to de-prioritize that position.
-    MAX_PER_POSITION_IN_SHORTLIST = 2
+    MAX_PER_POSITION_IN_SHORTLIST = 3
     
     # --- Pitcher bench-phase boost ---
     # Once all batter non-bench roster slots (C, 1B, 2B, 3B, SS, OF, Util) are
