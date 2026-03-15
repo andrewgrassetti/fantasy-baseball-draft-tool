@@ -55,17 +55,18 @@ is designed to de-prioritize it.
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
 
-SP bench-phase boost: once every non-bench roster slot is filled, starting
-pitchers receive a multiplicative score boost to steer bench picks toward
-elite SP.  The boost grows linearly as more bench slots are occupied by
+SP bench-phase boost: once every batter non-bench roster slot (C, 1B, 2B,
+3B, SS, OF, Util) is filled, starting pitchers receive a multiplicative
+score boost to steer picks toward elite SP instead of drafting batters to
+the bench.  The boost grows linearly as more bench slots are occupied by
 non-pitchers, controlled by SP_BENCH_BOOST_BASE and
 SP_BENCH_BOOST_PER_NON_PITCHER.
 
-Offensive bench penalty: the mirror of the SP bench boost.  Once bench
-filling begins, non-pitcher candidates receive a score penalty (multiplier
-< 1.0) that grows stronger as more bench slots are occupied by non-pitchers.
-This discourages hoarding offensive bench players and steers later bench
-picks toward pitchers.  Controlled by OFFENSIVE_BENCH_PENALTY_BASE and
+Offensive bench penalty: the mirror of the SP bench boost.  Once all batter
+non-bench slots are filled, non-pitcher candidates receive a score penalty
+(multiplier < 1.0) that grows stronger as more bench slots are occupied by
+non-pitchers.  This discourages hoarding offensive bench players and steers
+later picks toward pitchers.  Controlled by OFFENSIVE_BENCH_PENALTY_BASE and
 OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER.
 """
 
@@ -173,20 +174,21 @@ class DraftSimulator:
     MAX_PER_POSITION_IN_SHORTLIST = 2
     
     # --- SP bench-phase boost ---
-    # Once all non-bench roster slots are filled, starting pitchers receive a
-    # score multiplier to strongly encourage drafting them over position players
-    # for bench spots.  The boost increases as more bench slots are occupied by
-    # non-pitchers.
+    # Once all batter non-bench roster slots (C, 1B, 2B, 3B, SS, OF, Util) are
+    # filled, starting pitchers receive a score multiplier to strongly encourage
+    # drafting them over position players for bench spots.  The boost increases
+    # as more bench slots are occupied by non-pitchers.
     #   effective_boost = SP_BENCH_BOOST_BASE
     #                     + bench_non_pitchers * SP_BENCH_BOOST_PER_NON_PITCHER
     SP_BENCH_BOOST_BASE = 2.0             # Multiplier when bench filling begins
     SP_BENCH_BOOST_PER_NON_PITCHER = 0.5  # Additional multiplier per bench non-pitcher
 
     # --- Offensive bench penalty ---
-    # Mirror of the SP bench-phase boost.  Once all non-bench roster slots are
-    # filled, non-pitcher candidates receive a score penalty (multiplier < 1.0)
-    # that decreases as more bench slots are occupied by non-pitchers.  This
-    # discourages hoarding offensive bench players beyond the first 1-2.
+    # Mirror of the SP bench-phase boost.  Once all batter non-bench roster
+    # slots (C, 1B, 2B, 3B, SS, OF, Util) are filled, non-pitcher candidates
+    # receive a score penalty (multiplier < 1.0) that decreases as more bench
+    # slots are occupied by non-pitchers.  This discourages hoarding offensive
+    # bench players beyond the first 1-2.
     #   effective_penalty = OFFENSIVE_BENCH_PENALTY_BASE
     #                       - bench_non_pitchers * OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER
     # The result is clamped to [OFFENSIVE_BENCH_PENALTY_FLOOR, 1.0].
@@ -765,14 +767,14 @@ class DraftSimulator:
             primary_pos = position.split('/')[0].strip()
             score *= self.POSITION_PRIORITY.get(primary_pos, 1.0)
         
-        # Factor 7: SP bench-phase boost — when all non-bench slots are filled,
-        # strongly favour starting pitchers for bench spots, increasingly so as
-        # more bench slots are occupied by non-pitchers.
+        # Factor 7: SP bench-phase boost — when all batter non-bench slots are
+        # filled, strongly favour starting pitchers to avoid drafting batters
+        # to the bench, increasingly so as more bench slots hold non-pitchers.
         score *= self._sp_bench_phase_boost(team_name, is_pitcher, player_row['POS'])
         
-        # Factor 8: Offensive bench penalty — when all non-bench slots are
-        # filled, penalise non-pitcher candidates for bench spots, increasingly
-        # so as more bench slots are occupied by non-pitchers.
+        # Factor 8: Offensive bench penalty — when all batter non-bench slots
+        # are filled, penalise non-pitcher candidates to avoid drafting batters
+        # to the bench, increasingly so as more bench slots hold non-pitchers.
         score *= self._offensive_bench_penalty(team_name, is_pitcher)
         
         return max(score, 0.0)  # Ensure non-negative
@@ -917,9 +919,13 @@ class DraftSimulator:
         """Return a score multiplier that boosts SP candidates when the team
         is filling bench slots, increasing as more bench slots hold non-pitchers.
 
-        The boost activates only when ALL non-bench roster slots (C, 1B, 2B, 3B,
-        SS, OF, Util, SP, RP, P) are filled and the candidate is an SP-eligible
-        pitcher.  It grows linearly with the number of non-pitcher bench players.
+        The boost activates once all *batter* non-bench roster slots (C, 1B,
+        2B, 3B, SS, OF, Util) are filled and the candidate is an SP-eligible
+        pitcher.  It grows linearly with the number of non-pitcher bench
+        players.  Checking only batter slots (rather than all non-bench slots)
+        ensures the boost engages as soon as new batters would land on the
+        bench, even when pitcher named slots are still open — a scenario
+        common for teams with many keeper batters.
 
         Args:
             team_name: Name of the drafting team.
@@ -938,11 +944,13 @@ class DraftSimulator:
 
         team = self.engine.teams[team_name]
 
-        # Check that every non-bench slot is filled
-        non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']
-        for slot in non_bench_slots:
+        # Check that every batter non-bench slot is filled.  Once these are
+        # full any new non-pitcher will land on the bench, so boosting SP
+        # candidates steers the team toward pitchers instead.
+        batter_non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']
+        for slot in batter_non_bench_slots:
             if team.slots_filled.get(slot, 0) < team.SLOT_LIMITS.get(slot, 0):
-                return 1.0  # Still have non-bench slots open
+                return 1.0  # Still have batter non-bench slots open
 
         bn_filled = team.slots_filled.get('BN', 0)
         bn_limit = team.SLOT_LIMITS.get('BN', 0)
@@ -966,10 +974,13 @@ class DraftSimulator:
         the team is filling bench slots, decreasing as more bench slots hold
         non-pitchers.
 
-        The penalty activates only when ALL non-bench roster slots (C, 1B, 2B,
-        3B, SS, OF, Util, SP, RP, P) are filled and the candidate is a
-        non-pitcher.  It shrinks linearly with the number of non-pitcher bench
-        players already rostered.
+        The penalty activates once all *batter* non-bench roster slots (C, 1B,
+        2B, 3B, SS, OF, Util) are filled and the candidate is a non-pitcher.
+        It shrinks linearly with the number of non-pitcher bench players
+        already rostered.  Checking only batter slots (rather than all
+        non-bench slots) ensures the penalty engages as soon as new batters
+        would land on the bench, even when pitcher named slots are still
+        open — a scenario common for teams with many keeper batters.
 
         Args:
             team_name: Name of the drafting team.
@@ -983,11 +994,13 @@ class DraftSimulator:
 
         team = self.engine.teams[team_name]
 
-        # Only activate once all non-bench slots are filled
-        non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']
-        for slot in non_bench_slots:
+        # Only activate once all batter non-bench slots are filled.  Once
+        # these are full any new non-pitcher will land on the bench, so
+        # penalising them steers the team toward pitchers instead.
+        batter_non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']
+        for slot in batter_non_bench_slots:
             if team.slots_filled.get(slot, 0) < team.SLOT_LIMITS.get(slot, 0):
-                return 1.0  # Still have non-bench slots open
+                return 1.0  # Still have batter non-bench slots open
 
         bn_filled = team.slots_filled.get('BN', 0)
         bn_limit = team.SLOT_LIMITS.get('BN', 0)

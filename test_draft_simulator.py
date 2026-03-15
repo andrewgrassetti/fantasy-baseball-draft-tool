@@ -1178,8 +1178,8 @@ def test_offensive_bench_penalty_decreases_with_non_pitchers():
 
 
 def test_offensive_bench_penalty_no_effect_before_bench_phase():
-    """The offensive bench penalty should not activate when non-bench
-    slots are still open."""
+    """The offensive bench penalty should not activate when batter non-bench
+    slots (C, 1B, 2B, 3B, SS, OF, Util) are still open."""
     from src.models import Player
     print("\n" + "=" * 60)
     print("TEST: Offensive bench penalty inactive before bench phase")
@@ -1221,16 +1221,104 @@ def test_offensive_bench_penalty_no_effect_before_bench_phase():
             is_pitcher=is_pitcher,
         )
 
-    # Fill only some non-bench slots (e.g., 8 batters, leaving Util open)
+    # Fill only some batter non-bench slots (8 batters = C,1B,2B,3B,SS,OF*3;
+    # Util still open) plus 5 pitchers.
     for i in range(8):
         team.add_player(_make_player(bat_df.iloc[i], False))
     for i in range(5):
         team.add_player(_make_player(pitch_df.iloc[i], True))
 
-    # Should return 1.0 since non-bench slots are still open
+    # Should return 1.0 since Util batter slots are still open
     pen = sim._offensive_bench_penalty('PreBenchTeam', False)
     assert pen == 1.0, f"Expected 1.0 but got {pen}"
     print("  \u2705 PASSED: No penalty before bench phase")
+
+
+def test_bench_mechanisms_activate_with_pitcher_slots_open():
+    """Bench penalty and SP boost should activate when all batter non-bench
+    slots (C, 1B, 2B, 3B, SS, OF, Util) are full, even when pitcher named
+    slots (SP, RP, P) are still open.
+
+    This reproduces the scenario where a team has many keeper batters: their
+    batter named slots fill early, batters start going to bench, but without
+    this fix the bench mechanisms would not engage because pitcher named slots
+    are still vacant.
+    """
+    from src.models import Player
+    print("\n" + "=" * 60)
+    print("TEST: Bench mechanisms activate with pitcher slots still open")
+    print("=" * 60)
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(9200 + i) for i in range(14)],
+        'Name': [f'B{i}' for i in range(14)],
+        'POS': ['C', '1B', '2B', '3B', 'SS'] + ['OF'] * 3 + ['OF'] * 2 + ['OF'] * 4,
+        'Team': ['NYY'] * 14,
+        'AB': [500] * 14, 'R': [70] * 14, 'HR': [20] * 14, 'RBI': [65] * 14,
+        'SB': [8] * 14, 'OBP': [0.330] * 14, 'WAR': [2.0] * 14,
+        'Dollars': [30] * 14,
+    })
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(9300 + i) for i in range(8)],
+        'Name': [f'P{i}' for i in range(8)],
+        'POS': ['SP'] * 4 + ['RP'] * 2 + ['SP'] * 2,
+        'Team': ['LAD'] * 8,
+        'IP': [180] * 8, 'SO': [200] * 8, 'ERA': [3.50] * 8,
+        'WHIP': [1.15] * 8, 'WAR': [4.0] * 8, 'SV': [0] * 8, 'QS': [15] * 8,
+        'Dollars': [30] * 8,
+    })
+
+    team_names = ['KeeperTeam', 'Other']
+    engine = DraftEngine(bat_df.copy(), pitch_df.copy(), team_names=team_names)
+    csv = 'player_name,pick_number\nKeeperTeam,1\nOther,2'
+    sim = DraftSimulator(engine, csv, user_team_name='Other', random_seed=42)
+    team = sim.engine.teams['KeeperTeam']
+
+    def _make_player(row, is_pitcher):
+        return Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row['Team'],
+            dollars=row.get('Dollars', 0),
+            stats=row.to_dict(),
+            is_pitcher=is_pitcher,
+        )
+
+    # Fill all 10 batter non-bench slots (C, 1B, 2B, 3B, SS, OF*3, Util*2)
+    for i in range(10):
+        team.add_player(_make_player(bat_df.iloc[i], False))
+
+    # Leave ALL pitcher named slots empty (SP=0/3, RP=0/2, P=0/1)
+    # This simulates a team whose keepers are all batters
+
+    # Verify batter non-bench full, pitcher non-bench empty
+    for slot in ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']:
+        assert team.slots_filled[slot] == team.SLOT_LIMITS[slot], f"{slot} not filled"
+    for slot in ['SP', 'RP', 'P']:
+        assert team.slots_filled[slot] == 0, f"{slot} should be empty"
+
+    # Offensive bench penalty should activate (batter slots full)
+    pen = sim._offensive_bench_penalty('KeeperTeam', False)
+    assert pen < 1.0, (
+        f"Expected penalty < 1.0 when batter slots full but pitcher "
+        f"slots open, got {pen}"
+    )
+    print(f"  Offensive bench penalty = {pen:.2f} (< 1.0 \u2705)")
+
+    # SP bench boost should activate (batter slots full)
+    boost = sim._sp_bench_phase_boost('KeeperTeam', True, 'SP')
+    assert boost > 1.0, (
+        f"Expected boost > 1.0 when batter slots full but pitcher "
+        f"slots open, got {boost}"
+    )
+    print(f"  SP bench boost = {boost:.2f} (> 1.0 \u2705)")
+
+    # No penalty for pitcher, no boost for non-pitcher (unchanged)
+    assert sim._offensive_bench_penalty('KeeperTeam', True) == 1.0
+    assert sim._sp_bench_phase_boost('KeeperTeam', False, 'OF') == 1.0
+
+    print("  \u2705 PASSED: Bench mechanisms activate with pitcher slots still open")
 
 
 def _make_batter(player_id, dollars, stats=None):
