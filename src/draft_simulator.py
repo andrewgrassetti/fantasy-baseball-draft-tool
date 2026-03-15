@@ -1149,10 +1149,9 @@ class DraftSimulator:
             for pos_str in unique_positions:
                 sp_boost_map[pos_str] = self._sp_bench_phase_boost(team_name, True, pos_str)
 
-        # Pre-compute offensive bench penalty (constant for all candidates of same type)
-        offensive_bench_pen = 1.0
-        if not is_pitcher:
-            offensive_bench_pen = self._offensive_bench_penalty(team_name, False)
+        # Pre-compute offensive bench penalty (constant for all candidates of same type;
+        # defaults to 1.0 for pitchers so the multiply is a no-op)
+        offensive_bench_pen = self._offensive_bench_penalty(team_name, is_pitcher)
 
         for i in range(n):
             pos = positions[i]
@@ -1162,8 +1161,7 @@ class DraftSimulator:
             if is_pitcher:
                 scores[i] *= sp_boost_map[pos]
 
-        if not is_pitcher:
-            scores *= offensive_bench_pen
+        scores *= offensive_bench_pen
 
         np.maximum(scores, 0.0, out=scores)
 
