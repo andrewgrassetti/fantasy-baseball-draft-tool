@@ -1086,6 +1086,151 @@ def test_sp_bench_boost_increases_with_non_pitchers():
     return passed
 
 
+def test_offensive_bench_penalty_decreases_with_non_pitchers():
+    """The offensive bench penalty should grow stronger (lower multiplier) as
+    more bench slots are occupied by non-pitchers.
+
+    We directly call _offensive_bench_penalty with varying numbers of bench
+    non-pitchers and verify the multiplier decreases monotonically.
+    """
+    from src.models import Player
+    print("\n" + "=" * 60)
+    print("TEST: Offensive bench penalty decreases with bench non-pitchers")
+    print("=" * 60)
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(7000 + i) for i in range(18)],
+        'Name': [f'B{i}' for i in range(18)],
+        'POS': ['C', '1B', '2B', '3B', 'SS'] + ['OF'] * 3 + ['OF'] * 2 + ['OF'] * 8,
+        'Team': ['NYY'] * 18,
+        'AB': [500] * 18, 'R': [70] * 18, 'HR': [20] * 18, 'RBI': [65] * 18,
+        'SB': [8] * 18, 'OBP': [0.330] * 18, 'WAR': [2.0] * 18,
+        'Dollars': [30] * 18,
+    })
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(8000 + i) for i in range(10)],
+        'Name': [f'P{i}' for i in range(10)],
+        'POS': ['SP'] * 3 + ['RP'] * 2 + ['SP'] + ['SP'] * 4,
+        'Team': ['LAD'] * 10,
+        'IP': [180] * 10, 'SO': [200] * 10, 'ERA': [3.50] * 10,
+        'WHIP': [1.15] * 10, 'WAR': [4.0] * 10, 'SV': [0] * 10, 'QS': [15] * 10,
+        'Dollars': [30] * 10,
+    })
+
+    team_names = ['PenaltyTeam', 'Other']
+    engine = DraftEngine(bat_df.copy(), pitch_df.copy(), team_names=team_names)
+    csv = 'player_name,pick_number\nPenaltyTeam,1\nOther,2'
+    sim = DraftSimulator(engine, csv, user_team_name='Other', random_seed=42)
+    team = sim.engine.teams['PenaltyTeam']
+
+    def _make_player(row, is_pitcher):
+        return Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row['Team'],
+            dollars=row.get('Dollars', 0),
+            stats=row.to_dict(),
+            is_pitcher=is_pitcher,
+        )
+
+    # Fill all non-bench slots (10 batters + 6 pitchers)
+    for i in range(10):
+        team.add_player(_make_player(bat_df.iloc[i], False))
+    for i in range(6):
+        team.add_player(_make_player(pitch_df.iloc[i], True))
+
+    # Verify non-bench full, bench empty
+    for slot in ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']:
+        assert team.slots_filled[slot] == team.SLOT_LIMITS[slot], f"{slot} not filled"
+    assert team.slots_filled['BN'] == 0
+
+    # Collect penalty values as we add non-pitcher bench players
+    penalties = []
+    pen_0 = sim._offensive_bench_penalty('PenaltyTeam', False)
+    penalties.append(pen_0)
+    print(f"  Bench non-pitchers=0: penalty={pen_0:.2f}")
+
+    for j in range(4):
+        team.add_player(_make_player(bat_df.iloc[10 + j], False))
+        p = sim._offensive_bench_penalty('PenaltyTeam', False)
+        penalties.append(p)
+        print(f"  Bench non-pitchers={j + 1}: penalty={p:.2f}")
+
+    # Verify monotonically decreasing
+    passed = all(penalties[i] > penalties[i + 1] for i in range(len(penalties) - 1))
+    # Verify penalty < 1.0 for all entries
+    passed = passed and all(p < 1.0 for p in penalties)
+    # Verify no penalty for pitcher candidate
+    no_penalty = sim._offensive_bench_penalty('PenaltyTeam', True)
+    passed = passed and no_penalty == 1.0
+    # Verify penalty is above the floor
+    passed = passed and all(p >= sim.OFFENSIVE_BENCH_PENALTY_FLOOR for p in penalties)
+
+    if passed:
+        print("  \u2705 PASSED: Offensive bench penalty decreases monotonically")
+    else:
+        print("  \u274c FAILED: Offensive bench penalty does not decrease correctly")
+
+    assert passed
+
+
+def test_offensive_bench_penalty_no_effect_before_bench_phase():
+    """The offensive bench penalty should not activate when non-bench
+    slots are still open."""
+    from src.models import Player
+    print("\n" + "=" * 60)
+    print("TEST: Offensive bench penalty inactive before bench phase")
+    print("=" * 60)
+
+    bat_df = pd.DataFrame({
+        'PlayerId': [str(7100 + i) for i in range(12)],
+        'Name': [f'B{i}' for i in range(12)],
+        'POS': ['C', '1B', '2B', '3B', 'SS'] + ['OF'] * 3 + ['OF'] * 4,
+        'Team': ['NYY'] * 12,
+        'AB': [500] * 12, 'R': [70] * 12, 'HR': [20] * 12, 'RBI': [65] * 12,
+        'SB': [8] * 12, 'OBP': [0.330] * 12, 'WAR': [2.0] * 12,
+        'Dollars': [30] * 12,
+    })
+    pitch_df = pd.DataFrame({
+        'PlayerId': [str(8100 + i) for i in range(8)],
+        'Name': [f'P{i}' for i in range(8)],
+        'POS': ['SP'] * 3 + ['RP'] * 2 + ['SP'] * 3,
+        'Team': ['LAD'] * 8,
+        'IP': [180] * 8, 'SO': [200] * 8, 'ERA': [3.50] * 8,
+        'WHIP': [1.15] * 8, 'WAR': [4.0] * 8, 'SV': [0] * 8, 'QS': [15] * 8,
+        'Dollars': [30] * 8,
+    })
+
+    team_names = ['PreBenchTeam', 'Other']
+    engine = DraftEngine(bat_df.copy(), pitch_df.copy(), team_names=team_names)
+    csv = 'player_name,pick_number\nPreBenchTeam,1\nOther,2'
+    sim = DraftSimulator(engine, csv, user_team_name='Other', random_seed=42)
+    team = sim.engine.teams['PreBenchTeam']
+
+    def _make_player(row, is_pitcher):
+        return Player(
+            player_id=str(row['PlayerId']),
+            name=row['Name'],
+            position=row['POS'],
+            team_mlb=row['Team'],
+            dollars=row.get('Dollars', 0),
+            stats=row.to_dict(),
+            is_pitcher=is_pitcher,
+        )
+
+    # Fill only some non-bench slots (e.g., 8 batters, leaving Util open)
+    for i in range(8):
+        team.add_player(_make_player(bat_df.iloc[i], False))
+    for i in range(5):
+        team.add_player(_make_player(pitch_df.iloc[i], True))
+
+    # Should return 1.0 since non-bench slots are still open
+    pen = sim._offensive_bench_penalty('PreBenchTeam', False)
+    assert pen == 1.0, f"Expected 1.0 but got {pen}"
+    print("  \u2705 PASSED: No penalty before bench phase")
+
+
 def _make_batter(player_id, dollars, stats=None):
     """Helper: create a batter Player for live_totals tests."""
     from src.models import Player
