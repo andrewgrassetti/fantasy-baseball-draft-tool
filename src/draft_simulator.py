@@ -157,21 +157,21 @@ class DraftSimulator:
     EPSILON = 0.01
     
     # Maximum number of top players (by Dollar value) to consider per pick
-    TOP_N_PLAYERS = 75
+    TOP_N_PLAYERS = 50
     
     # Maximum number of top-scored candidates to shortlist per position type
     # (batters and pitchers separately) before probabilistic selection.
     # This ensures that within each position type, value ordering is respected
     # and prevents lower-value players at a position from being drafted before
     # higher-value ones.
-    SHORTLIST_PER_TYPE = 10
+    SHORTLIST_PER_TYPE = 5
     
     # Maximum number of candidates from any single fielding position allowed
     # in the shortlist.  This prevents a single position (e.g. catcher) from
     # monopolizing the batter shortlist when its players happen to have the
     # highest raw dollar values, which would negate the positional weighting
     # designed to de-prioritize that position.
-    MAX_PER_POSITION_IN_SHORTLIST = 3
+    MAX_PER_POSITION_IN_SHORTLIST = 2
     
     # --- Pitcher bench-phase boost ---
     # Once all batter non-bench roster slots (C, 1B, 2B, 3B, SS, OF, Util) are
@@ -192,8 +192,8 @@ class DraftSimulator:
     #   effective_penalty = OFFENSIVE_BENCH_PENALTY_BASE
     #                       - bench_non_pitchers * OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER
     # The result is clamped to [OFFENSIVE_BENCH_PENALTY_FLOOR, 1.0].
-    OFFENSIVE_BENCH_PENALTY_BASE = 0.40               # Multiplier when bench filling begins (1st bench batter)
-    OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER = 0.15    # Reduction per existing bench non-pitcher
+    OFFENSIVE_BENCH_PENALTY_BASE = 0.60               # Multiplier when bench filling begins (1st bench batter)
+    OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER = 0.25    # Reduction per existing bench non-pitcher
     OFFENSIVE_BENCH_PENALTY_FLOOR = 0.02              # Minimum penalty multiplier (never fully zero)
 
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None, team_profiles: Optional[Dict[str, Dict]] = None):
