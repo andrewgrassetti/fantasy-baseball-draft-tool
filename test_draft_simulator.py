@@ -1157,8 +1157,10 @@ def test_offensive_bench_penalty_decreases_with_non_pitchers():
         penalties.append(p)
         print(f"  Bench non-pitchers={j + 1}: penalty={p:.2f}")
 
-    # Verify monotonically decreasing
-    passed = all(penalties[i] > penalties[i + 1] for i in range(len(penalties) - 1))
+    # Verify monotonically non-increasing (allows equal values once floor is hit)
+    passed = all(penalties[i] >= penalties[i + 1] for i in range(len(penalties) - 1))
+    # Verify overall downward trend (first > last)
+    passed = passed and penalties[0] > penalties[-1]
     # Verify penalty < 1.0 for all entries
     passed = passed and all(p < 1.0 for p in penalties)
     # Verify no penalty for pitcher candidate

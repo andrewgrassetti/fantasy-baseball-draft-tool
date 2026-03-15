@@ -190,9 +190,9 @@ class DraftSimulator:
     #   effective_penalty = OFFENSIVE_BENCH_PENALTY_BASE
     #                       - bench_non_pitchers * OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER
     # The result is clamped to [OFFENSIVE_BENCH_PENALTY_FLOOR, 1.0].
-    OFFENSIVE_BENCH_PENALTY_BASE = 0.75               # Multiplier when bench filling begins (1st bench batter)
+    OFFENSIVE_BENCH_PENALTY_BASE = 0.40               # Multiplier when bench filling begins (1st bench batter)
     OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER = 0.15    # Reduction per existing bench non-pitcher
-    OFFENSIVE_BENCH_PENALTY_FLOOR = 0.10              # Minimum penalty multiplier (never fully zero)
+    OFFENSIVE_BENCH_PENALTY_FLOOR = 0.02              # Minimum penalty multiplier (never fully zero)
 
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None, team_profiles: Optional[Dict[str, Dict]] = None):
         """Initialize the draft simulator.
