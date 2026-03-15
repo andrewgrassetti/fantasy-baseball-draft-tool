@@ -60,6 +60,13 @@ pitchers receive a multiplicative score boost to steer bench picks toward
 elite SP.  The boost grows linearly as more bench slots are occupied by
 non-pitchers, controlled by SP_BENCH_BOOST_BASE and
 SP_BENCH_BOOST_PER_NON_PITCHER.
+
+Offensive bench penalty: the mirror of the SP bench boost.  Once bench
+filling begins, non-pitcher candidates receive a score penalty (multiplier
+< 1.0) that grows stronger as more bench slots are occupied by non-pitchers.
+This discourages hoarding offensive bench players and steers later bench
+picks toward pitchers.  Controlled by OFFENSIVE_BENCH_PENALTY_BASE and
+OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER.
 """
 
 import logging
@@ -174,7 +181,19 @@ class DraftSimulator:
     #                     + bench_non_pitchers * SP_BENCH_BOOST_PER_NON_PITCHER
     SP_BENCH_BOOST_BASE = 2.0             # Multiplier when bench filling begins
     SP_BENCH_BOOST_PER_NON_PITCHER = 0.5  # Additional multiplier per bench non-pitcher
-    
+
+    # --- Offensive bench penalty ---
+    # Mirror of the SP bench-phase boost.  Once all non-bench roster slots are
+    # filled, non-pitcher candidates receive a score penalty (multiplier < 1.0)
+    # that decreases as more bench slots are occupied by non-pitchers.  This
+    # discourages hoarding offensive bench players beyond the first 1-2.
+    #   effective_penalty = OFFENSIVE_BENCH_PENALTY_BASE
+    #                       - bench_non_pitchers * OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER
+    # The result is clamped to [OFFENSIVE_BENCH_PENALTY_FLOOR, 1.0].
+    OFFENSIVE_BENCH_PENALTY_BASE = 0.75               # Multiplier when bench filling begins (1st bench batter)
+    OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER = 0.15    # Reduction per existing bench non-pitcher
+    OFFENSIVE_BENCH_PENALTY_FLOOR = 0.10              # Minimum penalty multiplier (never fully zero)
+
     def __init__(self, engine: DraftEngine, draft_order_csv: str, user_team_name: str, random_seed: Optional[int] = None, snapshot_mode: bool = False, draft_order_df: Optional[pd.DataFrame] = None, team_profiles: Optional[Dict[str, Dict]] = None):
         """Initialize the draft simulator.
         
@@ -751,6 +770,11 @@ class DraftSimulator:
         # more bench slots are occupied by non-pitchers.
         score *= self._sp_bench_phase_boost(team_name, is_pitcher, player_row['POS'])
         
+        # Factor 8: Offensive bench penalty — when all non-bench slots are
+        # filled, penalise non-pitcher candidates for bench spots, increasingly
+        # so as more bench slots are occupied by non-pitchers.
+        score *= self._offensive_bench_penalty(team_name, is_pitcher)
+        
         return max(score, 0.0)  # Ensure non-negative
     
     def _calculate_positional_need(self, player_row: pd.Series, team_name: str, is_pitcher: bool) -> float:
@@ -937,6 +961,52 @@ class DraftSimulator:
 
         return self.SP_BENCH_BOOST_BASE + bench_non_pitchers * self.SP_BENCH_BOOST_PER_NON_PITCHER
 
+    def _offensive_bench_penalty(self, team_name: str, is_pitcher: bool) -> float:
+        """Return a score multiplier that penalises non-pitcher candidates when
+        the team is filling bench slots, decreasing as more bench slots hold
+        non-pitchers.
+
+        The penalty activates only when ALL non-bench roster slots (C, 1B, 2B,
+        3B, SS, OF, Util, SP, RP, P) are filled and the candidate is a
+        non-pitcher.  It shrinks linearly with the number of non-pitcher bench
+        players already rostered.
+
+        Args:
+            team_name: Name of the drafting team.
+            is_pitcher: Whether the candidate is a pitcher.
+
+        Returns:
+            Multiplier in [OFFENSIVE_BENCH_PENALTY_FLOOR, 1.0] (1.0 = no penalty).
+        """
+        if is_pitcher:
+            return 1.0
+
+        team = self.engine.teams[team_name]
+
+        # Only activate once all non-bench slots are filled
+        non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util', 'SP', 'RP', 'P']
+        for slot in non_bench_slots:
+            if team.slots_filled.get(slot, 0) < team.SLOT_LIMITS.get(slot, 0):
+                return 1.0  # Still have non-bench slots open
+
+        bn_filled = team.slots_filled.get('BN', 0)
+        bn_limit = team.SLOT_LIMITS.get('BN', 0)
+        if bn_filled >= bn_limit:
+            return 1.0  # Bench is full — nothing left to fill
+
+        # Count how many bench players are non-pitchers
+        total_pitchers = sum(1 for p in team.roster if p.is_pitcher)
+        pitchers_in_named_slots = (
+            team.slots_filled.get('SP', 0)
+            + team.slots_filled.get('RP', 0)
+            + team.slots_filled.get('P', 0)
+        )
+        bench_pitchers = max(total_pitchers - pitchers_in_named_slots, 0)
+        bench_non_pitchers = max(bn_filled - bench_pitchers, 0)
+
+        penalty = self.OFFENSIVE_BENCH_PENALTY_BASE - bench_non_pitchers * self.OFFENSIVE_BENCH_PENALTY_PER_NON_PITCHER
+        return max(penalty, self.OFFENSIVE_BENCH_PENALTY_FLOOR)
+
     def _position_diverse_shortlist(self, candidates: List[Dict]) -> List[Dict]:
         """Build a shortlist of up to SHORTLIST_PER_TYPE candidates while
         limiting any single fielding position to MAX_PER_POSITION_IN_SHORTLIST
@@ -1079,6 +1149,11 @@ class DraftSimulator:
             for pos_str in unique_positions:
                 sp_boost_map[pos_str] = self._sp_bench_phase_boost(team_name, True, pos_str)
 
+        # Pre-compute offensive bench penalty (constant for all candidates of same type)
+        offensive_bench_pen = 1.0
+        if not is_pitcher:
+            offensive_bench_pen = self._offensive_bench_penalty(team_name, False)
+
         for i in range(n):
             pos = positions[i]
             scores[i] += pos_need_map[pos] * self.WEIGHT_POSITIONAL_NEED
@@ -1086,6 +1161,9 @@ class DraftSimulator:
             scores[i] *= priority_map[pos]
             if is_pitcher:
                 scores[i] *= sp_boost_map[pos]
+
+        if not is_pitcher:
+            scores *= offensive_bench_pen
 
         np.maximum(scores, 0.0, out=scores)
 
