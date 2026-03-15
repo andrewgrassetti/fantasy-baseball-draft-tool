@@ -10,7 +10,7 @@ Provides probabilistic draft simulation functionality that:
   3. Category need (LOW weight)
   4. Player tendency (LOW weight)
   5. Position redundancy penalty (multiplicative — see below)
-  6. SP bench-phase boost (multiplicative — see below)
+  6. Pitcher bench-phase boost (multiplicative — see below)
 
 While flex slots (Util, P, BN) remain open, the AI considers ALL
 available players regardless of position so that high-value players
@@ -55,14 +55,14 @@ is designed to de-prioritize it.
 A power-law exponent is applied to composite scores before converting
 to probabilities, concentrating selection probability on top-valued players.
 
-SP bench-phase boost: once every batter non-bench roster slot (C, 1B, 2B,
-3B, SS, OF, Util) is filled, starting pitchers receive a multiplicative
-score boost to steer picks toward elite SP instead of drafting batters to
-the bench.  The boost grows linearly as more bench slots are occupied by
-non-pitchers, controlled by SP_BENCH_BOOST_BASE and
-SP_BENCH_BOOST_PER_NON_PITCHER.
+Pitcher bench-phase boost: once every batter non-bench roster slot (C, 1B,
+2B, 3B, SS, OF, Util) is filled, ALL pitcher candidates (SP and RP) receive
+a multiplicative score boost to steer picks toward pitchers instead of
+drafting batters to the bench.  The boost grows linearly as more bench
+slots are occupied by non-pitchers, controlled by PITCHER_BENCH_BOOST_BASE
+and PITCHER_BENCH_BOOST_PER_NON_PITCHER.
 
-Offensive bench penalty: the mirror of the SP bench boost.  Once all batter
+Offensive bench penalty: the mirror of the pitcher bench boost.  Once all batter
 non-bench slots are filled, non-pitcher candidates receive a score penalty
 (multiplier < 1.0) that grows stronger as more bench slots are occupied by
 non-pitchers.  This discourages hoarding offensive bench players and steers
@@ -173,18 +173,18 @@ class DraftSimulator:
     # designed to de-prioritize that position.
     MAX_PER_POSITION_IN_SHORTLIST = 2
     
-    # --- SP bench-phase boost ---
+    # --- Pitcher bench-phase boost ---
     # Once all batter non-bench roster slots (C, 1B, 2B, 3B, SS, OF, Util) are
-    # filled, starting pitchers receive a score multiplier to strongly encourage
-    # drafting them over position players for bench spots.  The boost increases
-    # as more bench slots are occupied by non-pitchers.
-    #   effective_boost = SP_BENCH_BOOST_BASE
-    #                     + bench_non_pitchers * SP_BENCH_BOOST_PER_NON_PITCHER
-    SP_BENCH_BOOST_BASE = 2.0             # Multiplier when bench filling begins
-    SP_BENCH_BOOST_PER_NON_PITCHER = 0.5  # Additional multiplier per bench non-pitcher
+    # filled, ALL pitcher candidates (SP and RP) receive a score multiplier to
+    # strongly encourage drafting them over position players for bench spots.
+    # The boost increases as more bench slots are occupied by non-pitchers.
+    #   effective_boost = PITCHER_BENCH_BOOST_BASE
+    #                     + bench_non_pitchers * PITCHER_BENCH_BOOST_PER_NON_PITCHER
+    PITCHER_BENCH_BOOST_BASE = 2.0             # Multiplier when bench filling begins
+    PITCHER_BENCH_BOOST_PER_NON_PITCHER = 0.5  # Additional multiplier per bench non-pitcher
 
     # --- Offensive bench penalty ---
-    # Mirror of the SP bench-phase boost.  Once all batter non-bench roster
+    # Mirror of the pitcher bench-phase boost.  Once all batter non-bench roster
     # slots (C, 1B, 2B, 3B, SS, OF, Util) are filled, non-pitcher candidates
     # receive a score penalty (multiplier < 1.0) that decreases as more bench
     # slots are occupied by non-pitchers.  This discourages hoarding offensive
@@ -767,10 +767,10 @@ class DraftSimulator:
             primary_pos = position.split('/')[0].strip()
             score *= self.POSITION_PRIORITY.get(primary_pos, 1.0)
         
-        # Factor 7: SP bench-phase boost — when all batter non-bench slots are
-        # filled, strongly favour starting pitchers to avoid drafting batters
+        # Factor 7: Pitcher bench-phase boost — when all batter non-bench
+        # slots are filled, strongly favour pitchers to avoid drafting batters
         # to the bench, increasingly so as more bench slots hold non-pitchers.
-        score *= self._sp_bench_phase_boost(team_name, is_pitcher, player_row['POS'])
+        score *= self._pitcher_bench_phase_boost(team_name, is_pitcher)
         
         # Factor 8: Offensive bench penalty — when all batter non-bench slots
         # are filled, penalise non-pitcher candidates to avoid drafting batters
@@ -915,13 +915,14 @@ class DraftSimulator:
         positions = [p.strip() for p in str(position_str).split('/')]
         return any(p in needed_positions for p in positions)
     
-    def _sp_bench_phase_boost(self, team_name: str, is_pitcher: bool, position: str) -> float:
-        """Return a score multiplier that boosts SP candidates when the team
-        is filling bench slots, increasing as more bench slots hold non-pitchers.
+    def _pitcher_bench_phase_boost(self, team_name: str, is_pitcher: bool) -> float:
+        """Return a score multiplier that boosts ALL pitcher candidates when
+        the team is filling bench slots, increasing as more bench slots hold
+        non-pitchers.
 
         The boost activates once all *batter* non-bench roster slots (C, 1B,
-        2B, 3B, SS, OF, Util) are filled and the candidate is an SP-eligible
-        pitcher.  It grows linearly with the number of non-pitcher bench
+        2B, 3B, SS, OF, Util) are filled and the candidate is a pitcher (SP
+        or RP).  It grows linearly with the number of non-pitcher bench
         players.  Checking only batter slots (rather than all non-bench slots)
         ensures the boost engages as soon as new batters would land on the
         bench, even when pitcher named slots are still open — a scenario
@@ -930,7 +931,6 @@ class DraftSimulator:
         Args:
             team_name: Name of the drafting team.
             is_pitcher: Whether the candidate is a pitcher.
-            position: Position string of the candidate (e.g. 'SP', 'SP/RP').
 
         Returns:
             Multiplier >= 1.0 (1.0 = no boost).
@@ -938,14 +938,10 @@ class DraftSimulator:
         if not is_pitcher:
             return 1.0
 
-        # Only boost SP-eligible candidates
-        if pd.isna(position) or 'SP' not in str(position):
-            return 1.0
-
         team = self.engine.teams[team_name]
 
         # Check that every batter non-bench slot is filled.  Once these are
-        # full any new non-pitcher will land on the bench, so boosting SP
+        # full any new non-pitcher will land on the bench, so boosting pitcher
         # candidates steers the team toward pitchers instead.
         batter_non_bench_slots = ['C', '1B', '2B', '3B', 'SS', 'OF', 'Util']
         for slot in batter_non_bench_slots:
@@ -967,7 +963,7 @@ class DraftSimulator:
         bench_pitchers = max(total_pitchers - pitchers_in_named_slots, 0)
         bench_non_pitchers = max(bn_filled - bench_pitchers, 0)
 
-        return self.SP_BENCH_BOOST_BASE + bench_non_pitchers * self.SP_BENCH_BOOST_PER_NON_PITCHER
+        return self.PITCHER_BENCH_BOOST_BASE + bench_non_pitchers * self.PITCHER_BENCH_BOOST_PER_NON_PITCHER
 
     def _offensive_bench_penalty(self, team_name: str, is_pitcher: bool) -> float:
         """Return a score multiplier that penalises non-pitcher candidates when
@@ -1156,11 +1152,8 @@ class DraftSimulator:
             scores += cat_scores * self.WEIGHT_CATEGORY_NEED
 
         # --- Apply position-dependent additive and multiplicative factors ---
-        # Pre-compute SP bench-phase boost (constant for all candidates of same type)
-        sp_boost_map: Dict[str, float] = {}
-        if is_pitcher:
-            for pos_str in unique_positions:
-                sp_boost_map[pos_str] = self._sp_bench_phase_boost(team_name, True, pos_str)
+        # Pre-compute pitcher bench-phase boost (constant for all pitcher candidates)
+        pitcher_bench_boost = self._pitcher_bench_phase_boost(team_name, is_pitcher) if is_pitcher else 1.0
 
         # Pre-compute offensive bench penalty (constant for all candidates of same type;
         # defaults to 1.0 for pitchers so the multiply is a no-op)
@@ -1171,8 +1164,10 @@ class DraftSimulator:
             scores[i] += pos_need_map[pos] * self.WEIGHT_POSITIONAL_NEED
             scores[i] *= redundancy_map[pos]
             scores[i] *= priority_map[pos]
-            if is_pitcher:
-                scores[i] *= sp_boost_map[pos]
+
+        # Apply pitcher bench-phase boost (scalar, same for all pitcher candidates)
+        if is_pitcher:
+            scores *= pitcher_bench_boost
 
         scores *= offensive_bench_pen
 

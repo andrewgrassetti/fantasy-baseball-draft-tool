@@ -888,10 +888,10 @@ def test_profile_passed_to_snapshot():
     return passed
 
 
-def test_sp_bench_phase_boost():
-    """When all non-bench slots are filled, SP candidates should be strongly
-    favoured for bench picks, and the preference should grow as more bench
-    slots are occupied by non-pitchers.
+def test_pitcher_bench_phase_boost():
+    """When all non-bench slots are filled, pitcher candidates (SP and RP)
+    should be strongly favoured for bench picks, and the preference should
+    grow as more bench slots are occupied by non-pitchers.
 
     Setup:
     - Fill every non-bench roster slot (C, 1B, 2B, 3B, SS, OF*3, Util*2,
@@ -902,7 +902,7 @@ def test_sp_bench_phase_boost():
     """
     from src.models import Player
     print("\n" + "=" * 60)
-    print("TEST: SP bench-phase boost when filling bench slots")
+    print("TEST: Pitcher bench-phase boost when filling bench slots")
     print("=" * 60)
 
     # --- Build large enough player pools so slots can be filled ---
@@ -990,23 +990,23 @@ def test_sp_bench_phase_boost():
     print(f"  Selection rate vs uniform: {pct / uniform_pct:.1f}x")
 
     if pct > uniform_pct * 3:
-        print("  \u2705 PASSED: SP bench-phase boost strongly favours starting pitchers")
+        print("  \u2705 PASSED: Pitcher bench-phase boost strongly favours pitchers")
         return True
     else:
-        print("  \u274c FAILED: SP not sufficiently favoured for bench spots")
+        print("  \u274c FAILED: Pitchers not sufficiently favoured for bench spots")
         return False
 
 
-def test_sp_bench_boost_increases_with_non_pitchers():
-    """The SP bench boost should grow stronger as more bench slots are
+def test_pitcher_bench_boost_increases_with_non_pitchers():
+    """The pitcher bench boost should grow stronger as more bench slots are
     occupied by non-pitchers.
 
-    We directly call _sp_bench_phase_boost with varying numbers of bench
+    We directly call _pitcher_bench_phase_boost with varying numbers of bench
     non-pitchers and verify the multiplier increases monotonically.
     """
     from src.models import Player
     print("\n" + "=" * 60)
-    print("TEST: SP bench boost increases with bench non-pitchers")
+    print("TEST: Pitcher bench boost increases with bench non-pitchers")
     print("=" * 60)
 
     bat_df = pd.DataFrame({
@@ -1058,13 +1058,13 @@ def test_sp_bench_boost_increases_with_non_pitchers():
 
     # Collect boost values as we add non-pitcher bench players
     boosts = []
-    boost_0 = sim._sp_bench_phase_boost('BenchTeam', True, 'SP')
+    boost_0 = sim._pitcher_bench_phase_boost('BenchTeam', True)
     boosts.append(boost_0)
     print(f"  Bench non-pitchers=0: boost={boost_0:.2f}")
 
     for j in range(4):
         team.add_player(_make_player(bat_df.iloc[10 + j], False))
-        b = sim._sp_bench_phase_boost('BenchTeam', True, 'SP')
+        b = sim._pitcher_bench_phase_boost('BenchTeam', True)
         boosts.append(b)
         print(f"  Bench non-pitchers={j + 1}: boost={b:.2f}")
 
@@ -1073,16 +1073,16 @@ def test_sp_bench_boost_increases_with_non_pitchers():
     # Verify boost > 1.0 for all entries
     passed = passed and all(b > 1.0 for b in boosts)
     # Verify no boost for non-pitcher candidate
-    no_boost = sim._sp_bench_phase_boost('BenchTeam', False, 'OF')
+    no_boost = sim._pitcher_bench_phase_boost('BenchTeam', False)
     passed = passed and no_boost == 1.0
-    # Verify no boost for RP candidate
-    rp_no_boost = sim._sp_bench_phase_boost('BenchTeam', True, 'RP')
-    passed = passed and rp_no_boost == 1.0
+    # Verify RP candidates also get the boost (not SP-only)
+    rp_boost = sim._pitcher_bench_phase_boost('BenchTeam', True)
+    passed = passed and rp_boost > 1.0
 
     if passed:
-        print("  \u2705 PASSED: SP boost increases monotonically with bench non-pitchers")
+        print("  \u2705 PASSED: Pitcher boost increases monotonically with bench non-pitchers")
     else:
-        print("  \u274c FAILED: SP boost does not increase correctly")
+        print("  \u274c FAILED: Pitcher boost does not increase correctly")
     return passed
 
 
@@ -1235,9 +1235,9 @@ def test_offensive_bench_penalty_no_effect_before_bench_phase():
 
 
 def test_bench_mechanisms_activate_with_pitcher_slots_open():
-    """Bench penalty and SP boost should activate when all batter non-bench
-    slots (C, 1B, 2B, 3B, SS, OF, Util) are full, even when pitcher named
-    slots (SP, RP, P) are still open.
+    """Bench penalty and pitcher boost should activate when all batter
+    non-bench slots (C, 1B, 2B, 3B, SS, OF, Util) are full, even when
+    pitcher named slots (SP, RP, P) are still open.
 
     This reproduces the scenario where a team has many keeper batters: their
     batter named slots fill early, batters start going to bench, but without
@@ -1306,17 +1306,17 @@ def test_bench_mechanisms_activate_with_pitcher_slots_open():
     )
     print(f"  Offensive bench penalty = {pen:.2f} (< 1.0 \u2705)")
 
-    # SP bench boost should activate (batter slots full)
-    boost = sim._sp_bench_phase_boost('KeeperTeam', True, 'SP')
+    # Pitcher bench boost should activate (batter slots full)
+    boost = sim._pitcher_bench_phase_boost('KeeperTeam', True)
     assert boost > 1.0, (
         f"Expected boost > 1.0 when batter slots full but pitcher "
         f"slots open, got {boost}"
     )
-    print(f"  SP bench boost = {boost:.2f} (> 1.0 \u2705)")
+    print(f"  Pitcher bench boost = {boost:.2f} (> 1.0 \u2705)")
 
     # No penalty for pitcher, no boost for non-pitcher (unchanged)
     assert sim._offensive_bench_penalty('KeeperTeam', True) == 1.0
-    assert sim._sp_bench_phase_boost('KeeperTeam', False, 'OF') == 1.0
+    assert sim._pitcher_bench_phase_boost('KeeperTeam', False) == 1.0
 
     print("  \u2705 PASSED: Bench mechanisms activate with pitcher slots still open")
 
@@ -1479,8 +1479,8 @@ if __name__ == '__main__':
     t12 = test_backward_compat_old_csv_format()
     t13 = test_new_2col_csv_format()
     t14 = test_profile_passed_to_snapshot()
-    t15 = test_sp_bench_phase_boost()
-    t16 = test_sp_bench_boost_increases_with_non_pitchers()
+    t15 = test_pitcher_bench_phase_boost()
+    t16 = test_pitcher_bench_boost_increases_with_non_pitchers()
 
     print("\n" + "=" * 60)
     print("SUMMARY")
@@ -1499,7 +1499,7 @@ if __name__ == '__main__':
     print(f"Test 12 (Backward compat old CSV): {'✅ PASSED' if t12 else '❌ FAILED'}")
     print(f"Test 13 (New 2-column CSV): {'✅ PASSED' if t13 else '❌ FAILED'}")
     print(f"Test 14 (Profile passed to snapshot): {'✅ PASSED' if t14 else '❌ FAILED'}")
-    print(f"Test 15 (SP bench-phase boost): {'✅ PASSED' if t15 else '❌ FAILED'}")
+    print(f"Test 15 (Pitcher bench-phase boost): {'✅ PASSED' if t15 else '❌ FAILED'}")
     print(f"Test 16 (SP boost increases with non-pitchers): {'✅ PASSED' if t16 else '❌ FAILED'}")
 
     all_passed = t1 and t2 and t3 and t4 and t5 and t6 and t7 and t8 and t9 and t10 and t11 and t12 and t13 and t14 and t15 and t16
