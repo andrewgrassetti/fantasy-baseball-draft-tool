@@ -754,13 +754,13 @@ with tab1:
                     df_show[_cc] = df_show['PlayerId'].apply(
                         lambda pid, cn=_cc: st.session_state.custom_hitter_values.get(str(pid), {}).get(cn, '')
                     )
-                display_cols = display_cols + list(st.session_state.custom_hitter_columns)
+                display_cols = display_cols + st.session_state.custom_hitter_columns
             elif view_option == "Pitchers":
                 for _cc in st.session_state.custom_pitcher_columns:
                     df_show[_cc] = df_show['PlayerId'].apply(
                         lambda pid, cn=_cc: st.session_state.custom_pitcher_values.get(str(pid), {}).get(cn, '')
                     )
-                display_cols = display_cols + list(st.session_state.custom_pitcher_columns)
+                display_cols = display_cols + st.session_state.custom_pitcher_columns
 
             st.dataframe(
                 df_show[display_cols],

@@ -123,7 +123,7 @@ class TestDeleteCustomColumnsConfig:
 # Column-name validation helpers  (mirrors UI logic)
 # ---------------------------------------------------------------------------
 
-def _validate_new_column(name: str, existing: list) -> str | None:
+def _validate_column_name(name: str, existing: list) -> str | None:
     """Return an error message, or None if valid."""
     stripped = name.strip()
     if not stripped:
@@ -135,21 +135,21 @@ def _validate_new_column(name: str, existing: list) -> str | None:
 
 class TestColumnNameValidation:
     def test_reject_empty(self):
-        assert _validate_new_column("", []) is not None
+        assert _validate_column_name("", []) is not None
 
     def test_reject_whitespace_only(self):
-        assert _validate_new_column("   ", []) is not None
+        assert _validate_column_name("   ", []) is not None
 
     def test_reject_duplicate(self):
-        assert _validate_new_column("Tier", ["Tier", "Notes"]) is not None
+        assert _validate_column_name("Tier", ["Tier", "Notes"]) is not None
 
     def test_accept_valid(self):
-        assert _validate_new_column("Tier", []) is None
+        assert _validate_column_name("Tier", []) is None
 
     def test_same_name_different_tables(self):
         # Hitters and pitchers may independently have the same column name
-        assert _validate_new_column("Tier", []) is None  # hitter first
-        assert _validate_new_column("Tier", []) is None  # pitcher second (own list)
+        assert _validate_column_name("Tier", []) is None  # hitter first
+        assert _validate_column_name("Tier", []) is None  # pitcher second (own list)
 
 
 # ---------------------------------------------------------------------------
