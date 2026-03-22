@@ -616,9 +616,19 @@ with tab1:
         sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="avail_sort_order")
 
     with search_col:
-        player_search = st.text_input("🔍 Search Players", key="avail_search", placeholder="Search by name...")
+        _search_labels = {
+            f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}": row['PlayerId']
+            for _, row in df_show.iterrows()
+        }
+        player_search = st.selectbox(
+            "🔍 Search Players",
+            options=sorted(_search_labels.keys()),
+            index=None,
+            key="avail_search",
+            placeholder="Type to search...",
+        )
     if player_search:
-        df_show = df_show[df_show['Name'].str.contains(player_search, case=False, na=False)]
+        df_show = df_show[df_show['PlayerId'] == _search_labels[player_search]]
 
     df_show = df_show.sort_values(by=sort_by, ascending=(sort_order == "Ascending"), na_position='last')
 
@@ -1581,9 +1591,19 @@ Team Alpha,4""", language="csv")
                 sim_sort_order = st.radio("Order", ["Descending", "Ascending"], horizontal=True, key="sim_sort_order")
 
             with sim_search_col:
-                sim_player_search = st.text_input("🔍 Search Players", key="sim_search", placeholder="Search by name...")
+                _sim_search_labels = {
+                    f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}": row['PlayerId']
+                    for _, row in sim_df_show.iterrows()
+                }
+                sim_player_search = st.selectbox(
+                    "🔍 Search Players",
+                    options=sorted(_sim_search_labels.keys()),
+                    index=None,
+                    key="sim_search",
+                    placeholder="Type to search...",
+                )
             if sim_player_search:
-                sim_df_show = sim_df_show[sim_df_show['Name'].str.contains(sim_player_search, case=False, na=False)]
+                sim_df_show = sim_df_show[sim_df_show['PlayerId'] == _sim_search_labels[sim_player_search]]
 
             sim_df_show = sim_df_show.sort_values(by=sim_sort_by, ascending=(sim_sort_order == "Ascending"), na_position='last')
 
