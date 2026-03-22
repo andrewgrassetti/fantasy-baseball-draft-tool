@@ -140,3 +140,103 @@ def delete_keeper_config(filepath: str) -> bool:
         return False
     except (OSError, PermissionError):
         return False
+
+
+# --- Custom Columns Persistence ---
+
+_CUSTOM_COLUMNS_DIR = os.path.join("saves", "custom_columns")
+
+
+def save_custom_columns_config(
+    name: str,
+    hitter_columns: List[str],
+    pitcher_columns: List[str],
+    hitter_values: Dict[str, Dict[str, str]],
+    pitcher_values: Dict[str, Dict[str, str]],
+    saves_dir: str = _CUSTOM_COLUMNS_DIR,
+) -> str:
+    """Save a custom columns configuration to a JSON file.
+
+    Args:
+        name: Name of the configuration
+        hitter_columns: List of custom hitter column names
+        pitcher_columns: List of custom pitcher column names
+        hitter_values: ``{PlayerId: {col_name: value}}`` for hitters
+        pitcher_values: ``{PlayerId: {col_name: value}}`` for pitchers
+        saves_dir: Directory to save to
+
+    Returns:
+        The full file path where the configuration was saved
+    """
+    os.makedirs(saves_dir, exist_ok=True)
+
+    config = {
+        "name": name,
+        "created_at": datetime.now().isoformat(),
+        "hitter_columns": hitter_columns,
+        "pitcher_columns": pitcher_columns,
+        "hitter_values": hitter_values,
+        "pitcher_values": pitcher_values,
+    }
+
+    sanitized_name = _sanitize_filename(name)
+    filename = f"{sanitized_name}.json"
+    filepath = os.path.join(saves_dir, filename)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    return filepath
+
+
+def load_custom_columns_config(filepath: str) -> Dict:
+    """Load a custom columns configuration from a JSON file.
+
+    Returns:
+        Dictionary with keys: name, created_at, hitter_columns,
+        pitcher_columns, hitter_values, pitcher_values
+    """
+    with open(filepath, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    return config
+
+
+def list_custom_columns_configs(saves_dir: str = _CUSTOM_COLUMNS_DIR) -> List[Dict]:
+    """List all saved custom column configurations.
+
+    Returns:
+        List of dicts with: name, filename, filepath, created_at
+    """
+    if not os.path.exists(saves_dir):
+        return []
+
+    configs: List[Dict] = []
+    for filename in os.listdir(saves_dir):
+        if filename.endswith(".json"):
+            filepath = os.path.join(saves_dir, filename)
+            try:
+                config = load_custom_columns_config(filepath)
+                configs.append(
+                    {
+                        "name": config.get("name", filename),
+                        "filename": filename,
+                        "filepath": filepath,
+                        "created_at": config.get("created_at", "Unknown"),
+                    }
+                )
+            except (json.JSONDecodeError, KeyError, FileNotFoundError):
+                continue
+
+    configs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return configs
+
+
+def delete_custom_columns_config(filepath: str) -> bool:
+    """Delete a saved custom columns configuration."""
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            return True
+        return False
+    except (OSError, PermissionError):
+        return False

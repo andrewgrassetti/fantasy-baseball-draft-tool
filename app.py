@@ -8,7 +8,10 @@ import os
 import random
 from src.data_loader import load_and_merge_data
 from src.draft_engine import DraftEngine
-from src.persistence import save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config
+from src.persistence import (
+    save_keeper_config, load_keeper_config, list_saved_configs, delete_keeper_config,
+    save_custom_columns_config, load_custom_columns_config, list_custom_columns_configs, delete_custom_columns_config,
+)
 from src.draft_simulator import DraftSimulator, run_monte_carlo_snapshot
 
 # Page Config (Wide layout is better for dashboards)
@@ -33,6 +36,16 @@ if 'table_key_counter' not in st.session_state:
     st.session_state.table_key_counter = 0
 if 'user_team_name' not in st.session_state:
     st.session_state.user_team_name = None
+
+# --- CUSTOM COLUMNS STATE ---
+if 'custom_hitter_columns' not in st.session_state:
+    st.session_state.custom_hitter_columns = []
+if 'custom_pitcher_columns' not in st.session_state:
+    st.session_state.custom_pitcher_columns = []
+if 'custom_hitter_values' not in st.session_state:
+    st.session_state.custom_hitter_values = {}
+if 'custom_pitcher_values' not in st.session_state:
+    st.session_state.custom_pitcher_values = {}
 
 # --- SIMULATOR STATE ---
 if 'sim_draft_queue' not in st.session_state:
@@ -734,6 +747,21 @@ with tab1:
                 display_cols = ['Queued', 'Prob_avail'] + cols
             else:
                 display_cols = ['Queued'] + cols
+
+            # Append custom columns for Batters / Pitchers views
+            if view_option == "Batters":
+                for _cc in st.session_state.custom_hitter_columns:
+                    df_show[_cc] = df_show['PlayerId'].apply(
+                        lambda pid, cn=_cc: st.session_state.custom_hitter_values.get(str(pid), {}).get(cn, '')
+                    )
+                display_cols = display_cols + st.session_state.custom_hitter_columns
+            elif view_option == "Pitchers":
+                for _cc in st.session_state.custom_pitcher_columns:
+                    df_show[_cc] = df_show['PlayerId'].apply(
+                        lambda pid, cn=_cc: st.session_state.custom_pitcher_values.get(str(pid), {}).get(cn, '')
+                    )
+                display_cols = display_cols + st.session_state.custom_pitcher_columns
+
             st.dataframe(
                 df_show[display_cols],
                 hide_index=True,
@@ -745,6 +773,184 @@ with tab1:
         else:
             st.info("No available players found.")
             st.session_state.selected_player = None
+
+    # ==========================================
+    # CUSTOM COLUMNS SECTION (tab1)
+    # ==========================================
+    st.divider()
+    with st.expander("📝 Custom Columns"):
+        cc_add_tab, cc_edit_tab, cc_save_tab = st.tabs(
+            ["Add / Remove Columns", "Edit Player Values", "💾 Save / Load"]
+        )
+
+        # --- Add / Remove Columns ---
+        with cc_add_tab:
+            cc_type_add = st.radio(
+                "Table", ["Hitters", "Pitchers"], horizontal=True, key="cc_type_add"
+            )
+            _cc_cols_key = (
+                "custom_hitter_columns" if cc_type_add == "Hitters" else "custom_pitcher_columns"
+            )
+            _cc_vals_key = (
+                "custom_hitter_values" if cc_type_add == "Hitters" else "custom_pitcher_values"
+            )
+            _existing_cols = st.session_state[_cc_cols_key]
+
+            add_c1, add_c2 = st.columns([3, 1])
+            with add_c1:
+                new_col_name = st.text_input(
+                    "New column name", key="cc_new_col_name", placeholder="e.g. Tier"
+                )
+            with add_c2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("➕ Add Column", key="cc_add_col_btn"):
+                    _name = new_col_name.strip()
+                    if not _name:
+                        st.error("Column name cannot be empty.")
+                    elif _name in _existing_cols:
+                        st.error(f"Column '{_name}' already exists for {cc_type_add.lower()}.")
+                    else:
+                        st.session_state[_cc_cols_key].append(_name)
+                        st.toast(f"Added column '{_name}' to {cc_type_add.lower()}.")
+                        st.rerun()
+
+            if _existing_cols:
+                st.caption(f"Current {cc_type_add.lower()} columns: {', '.join(_existing_cols)}")
+                rm_c1, rm_c2 = st.columns([3, 1])
+                with rm_c1:
+                    rm_col = st.selectbox(
+                        "Remove column", _existing_cols, key="cc_rm_col_select"
+                    )
+                with rm_c2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("🗑️ Remove", key="cc_rm_col_btn"):
+                        st.session_state[_cc_cols_key].remove(rm_col)
+                        # Clean up stored values for the removed column
+                        for pid in st.session_state[_cc_vals_key]:
+                            st.session_state[_cc_vals_key][pid].pop(rm_col, None)
+                        st.toast(f"Removed column '{rm_col}'.")
+                        st.rerun()
+            else:
+                st.info(f"No custom columns for {cc_type_add.lower()} yet.")
+
+        # --- Edit Player Values ---
+        with cc_edit_tab:
+            cc_type_edit = st.radio(
+                "Table", ["Hitters", "Pitchers"], horizontal=True, key="cc_type_edit"
+            )
+            if cc_type_edit == "Hitters":
+                _edit_cols = st.session_state.custom_hitter_columns
+                _edit_vals = st.session_state.custom_hitter_values
+                _edit_df = engine.bat_df
+            else:
+                _edit_cols = st.session_state.custom_pitcher_columns
+                _edit_vals = st.session_state.custom_pitcher_values
+                _edit_df = engine.pitch_df
+
+            if _edit_cols:
+                target_col = st.selectbox(
+                    "Custom column", _edit_cols, key="cc_target_col"
+                )
+                player_search_input = st.text_input(
+                    "Player name", key="cc_player_search", placeholder="Enter exact player name…"
+                )
+                if player_search_input:
+                    _matches = _edit_df[
+                        _edit_df['Name'].str.lower() == player_search_input.strip().lower()
+                    ]
+                    if _matches.empty:
+                        st.error(
+                            f"Player '{player_search_input}' not found in {cc_type_edit.lower()}."
+                        )
+                    else:
+                        _row = _matches.iloc[0]
+                        _pid = str(_row['PlayerId'])
+                        st.success(f"✅ Found: {_row['Name']} ({_row['POS']})")
+                        _cur_val = _edit_vals.get(_pid, {}).get(target_col, '')
+                        new_val = st.text_input(
+                            "Value", value=_cur_val, key="cc_new_value"
+                        )
+                        if st.button("💾 Save Value", key="cc_save_val_btn"):
+                            if _pid not in _edit_vals:
+                                _edit_vals[_pid] = {}
+                            _edit_vals[_pid][target_col] = new_val
+                            st.toast(
+                                f"Set **{target_col}** = '{new_val}' for {_row['Name']}"
+                            )
+                            st.rerun()
+            else:
+                st.info(f"Add a custom column for {cc_type_edit.lower()} first.")
+
+        # --- Save / Load ---
+        with cc_save_tab:
+            sv_c1, sv_c2 = st.columns(2)
+
+            with sv_c1:
+                st.markdown("**Save Current Custom Columns**")
+                cc_save_name = st.text_input(
+                    "Configuration name", key="cc_save_name",
+                    placeholder="e.g. My Custom Columns"
+                )
+                if st.button("💾 Save", key="cc_save_btn"):
+                    if not cc_save_name.strip():
+                        st.error("Please enter a configuration name.")
+                    else:
+                        try:
+                            fp = save_custom_columns_config(
+                                name=cc_save_name.strip(),
+                                hitter_columns=list(st.session_state.custom_hitter_columns),
+                                pitcher_columns=list(st.session_state.custom_pitcher_columns),
+                                hitter_values=dict(st.session_state.custom_hitter_values),
+                                pitcher_values=dict(st.session_state.custom_pitcher_values),
+                            )
+                            st.success(f"✅ Saved to {fp}")
+                        except Exception as e:
+                            st.error(f"Failed to save: {e}")
+
+            with sv_c2:
+                st.markdown("**Load Saved Custom Columns**")
+                _cc_configs = list_custom_columns_configs()
+                if _cc_configs:
+                    _cc_options = {}
+                    for cfg in _cc_configs:
+                        _disp = f"{cfg['name']} ({cfg['filename']})"
+                        _cc_options[_disp] = cfg['filepath']
+                    selected_cc_cfg = st.selectbox(
+                        "Select Configuration", list(_cc_options.keys()), key="cc_load_select"
+                    )
+                    ld_c1, ld_c2 = st.columns(2)
+                    with ld_c1:
+                        if st.button("📂 Load", key="cc_load_btn", type="primary"):
+                            try:
+                                _cfg = load_custom_columns_config(_cc_options[selected_cc_cfg])
+                                st.session_state.custom_hitter_columns = list(
+                                    _cfg.get("hitter_columns", [])
+                                )
+                                st.session_state.custom_pitcher_columns = list(
+                                    _cfg.get("pitcher_columns", [])
+                                )
+                                st.session_state.custom_hitter_values = dict(
+                                    _cfg.get("hitter_values", {})
+                                )
+                                st.session_state.custom_pitcher_values = dict(
+                                    _cfg.get("pitcher_values", {})
+                                )
+                                st.success(f"✅ Loaded: {_cfg['name']}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to load: {e}")
+                    with ld_c2:
+                        if st.button("🗑️ Delete", key="cc_delete_btn"):
+                            try:
+                                if delete_custom_columns_config(_cc_options[selected_cc_cfg]):
+                                    st.success("Deleted.")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete.")
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+                else:
+                    st.info("No saved custom column configurations found.")
 
     # ==========================================
     # SNAPSHOT PROJECTIONS SECTION (tab1)
