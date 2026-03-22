@@ -851,33 +851,30 @@ with tab1:
                 target_col = st.selectbox(
                     "Custom column", _edit_cols, key="cc_target_col"
                 )
-                player_search_input = st.text_input(
-                    "Player name", key="cc_player_search", placeholder="Enter exact player name…"
-                )
-                if player_search_input:
-                    _matches = _edit_df[
-                        _edit_df['Name'].str.lower() == player_search_input.strip().lower()
-                    ]
-                    if _matches.empty:
-                        st.error(
-                            f"Player '{player_search_input}' not found in {cc_type_edit.lower()}."
+                # Build searchable player options from the dataframe
+                _cc_player_options = {
+                    f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}": row
+                    for _, row in _edit_df.iterrows()
+                }
+                if _cc_player_options:
+                    _cc_selected_label = st.selectbox(
+                        "Player name", options=list(_cc_player_options.keys()),
+                        key="cc_player_search"
+                    )
+                    _row = _cc_player_options[_cc_selected_label]
+                    _pid = str(_row['PlayerId'])
+                    _cur_val = _edit_vals.get(_pid, {}).get(target_col, '')
+                    new_val = st.text_input(
+                        "Value", value=_cur_val, key="cc_new_value"
+                    )
+                    if st.button("💾 Save Value", key="cc_save_val_btn"):
+                        if _pid not in _edit_vals:
+                            _edit_vals[_pid] = {}
+                        _edit_vals[_pid][target_col] = new_val
+                        st.toast(
+                            f"Set **{target_col}** = '{new_val}' for {_row['Name']}"
                         )
-                    else:
-                        _row = _matches.iloc[0]
-                        _pid = str(_row['PlayerId'])
-                        st.success(f"✅ Found: {_row['Name']} ({_row['POS']})")
-                        _cur_val = _edit_vals.get(_pid, {}).get(target_col, '')
-                        new_val = st.text_input(
-                            "Value", value=_cur_val, key="cc_new_value"
-                        )
-                        if st.button("💾 Save Value", key="cc_save_val_btn"):
-                            if _pid not in _edit_vals:
-                                _edit_vals[_pid] = {}
-                            _edit_vals[_pid][target_col] = new_val
-                            st.toast(
-                                f"Set **{target_col}** = '{new_val}' for {_row['Name']}"
-                            )
-                            st.rerun()
+                        st.rerun()
             else:
                 st.info(f"Add a custom column for {cc_type_edit.lower()} first.")
 
