@@ -419,6 +419,14 @@ with tab1:
     if _sort_by_pre and _sort_by_pre in _df_pre.columns:
         _df_pre = _df_pre.sort_values(
             by=_sort_by_pre, ascending=(_sort_order_pre == 'Ascending'), na_position='last')
+    _search_pre = st.session_state.get('avail_search')
+    if _search_pre:
+        _search_labels_pre = {
+            f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}": row['PlayerId']
+            for _, row in _df_pre.iterrows()
+        }
+        if _search_pre in _search_labels_pre:
+            _df_pre = _df_pre[_df_pre['PlayerId'] == _search_labels_pre[_search_pre]]
     _tbl_key = f"available_players_table_{st.session_state.table_key_counter}"
     _tbl_state = st.session_state.get(_tbl_key)
     if _tbl_state is not None and hasattr(_tbl_state, 'selection') and _tbl_state.selection.rows:
@@ -1481,6 +1489,14 @@ Team Alpha,4""", language="csv")
             if _sim_sort_by_pre and _sim_sort_by_pre in _sim_df_pre.columns:
                 _sim_df_pre = _sim_df_pre.sort_values(
                     by=_sim_sort_by_pre, ascending=(_sim_sort_order_pre == 'Ascending'), na_position='last')
+            _sim_search_pre = st.session_state.get('sim_search')
+            if _sim_search_pre:
+                _sim_search_labels_pre = {
+                    f"{row['Name']} ({row['POS']}) - {row.get('Team', 'N/A')}": row['PlayerId']
+                    for _, row in _sim_df_pre.iterrows()
+                }
+                if _sim_search_pre in _sim_search_labels_pre:
+                    _sim_df_pre = _sim_df_pre[_sim_df_pre['PlayerId'] == _sim_search_labels_pre[_sim_search_pre]]
             _sim_tbl_key = f"sim_available_players_table_{st.session_state.sim_table_key_counter}"
             _sim_tbl_state = st.session_state.get(_sim_tbl_key)
             if _sim_tbl_state is not None and hasattr(_sim_tbl_state, 'selection') and _sim_tbl_state.selection.rows:
